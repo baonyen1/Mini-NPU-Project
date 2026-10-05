@@ -3,7 +3,6 @@
 module StageExecute_Top(
     clk,
     reset,
-    cpu_en,
 
     // input from ID/EX
     Instruction_address_ID_EX,
@@ -48,7 +47,7 @@ module StageExecute_Top(
     regfile_write_address_EX_MEM
 );
 
-input clk, reset, cpu_en;
+input clk, reset;
 
 input [31:0] Instruction_address_ID_EX;
 input [31:0] regfile_out_0_ID_EX;
@@ -143,7 +142,6 @@ ALU_Unit ALU(
 );
 
 BRU BRANCH_RESOLUTION_UNIT(
-    .cpu_en(cpu_en),
     .Instruction_address_ID_EX(Instruction_address_ID_EX),
     .regfile_out_0_ID_EX(fw_mux_0_output),
     .immediate_ID_EX(immediate_ID_EX),
@@ -159,7 +157,6 @@ BRU BRANCH_RESOLUTION_UNIT(
 EX_MEM_Reg EX_MEM(
     .clk(clk),
     .reset(reset),
-    .cpu_en(cpu_en),
 
     .Instruction_address_ID_EX(Instruction_address_ID_EX),
     .alu_output(alu_output),

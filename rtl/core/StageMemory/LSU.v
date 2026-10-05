@@ -3,7 +3,6 @@
 module LSU(
     clk,
     reset,
-    cpu_en,
     read_enable,
     write_enable,
     data_format,
@@ -12,7 +11,7 @@ module LSU(
     read_data
 );
 
-input clk, reset, cpu_en;
+input clk, reset;
 input read_enable, write_enable;
 input [2:0] data_format;
 input [9:0] address;
@@ -23,7 +22,6 @@ output [31:0] read_data;
 Data_Memory DATA_MEMORY(
     .clk(clk),
     .reset(reset),
-    .cpu_en(cpu_en),
     .read_enable(read_enable),
     .write_enable(write_enable),
     .data_format(data_format),

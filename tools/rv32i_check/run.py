@@ -23,13 +23,8 @@ AS = PFX + "as"; OC = PFX + "objcopy"
 M32 = 0xFFFFFFFF
 
 def build_sim():
-    """Compile rtl/core (FPGA wrappers excluded) with iverilog. The DFS stub is
-    added only while RISC_V_Top.v still instantiates workload_monitor."""
-    srcs = [f for f in glob.glob(os.path.join(CORE, "**", "*.v"), recursive=True)
-            if "Impl_Top" not in os.path.basename(f)]
-    top = open(os.path.join(CORE, "RISC_V_Top.v")).read()
-    if "workload_monitor" in top:
-        srcs.append(os.path.join(HERE, "stub_workload_monitor.v"))
+    """Compile rtl/core with iverilog."""
+    srcs = glob.glob(os.path.join(CORE, "**", "*.v"), recursive=True)
     os.makedirs("build", exist_ok=True)
     subprocess.run(["iverilog", "-g2012", "-o", "build/sim.vvp", "tb_dump.v"] + srcs, check=True)
 

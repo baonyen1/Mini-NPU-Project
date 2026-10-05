@@ -1,7 +1,6 @@
 `timescale 1ns / 1ps
 
 module Hazard_Unit(
-    cpu_en,
     pipeline_flush_signal,
     opcode_IF_ID,
     regfile_read_address_0_IF_ID,
@@ -30,7 +29,6 @@ module Hazard_Unit(
     load_use_stall
 );
 
-input cpu_en;
 input pipeline_flush_signal;
 input [6:0] opcode_IF_ID;
 input [4:0] regfile_read_address_0_IF_ID;
@@ -96,13 +94,13 @@ Forwarding_Unit FORWARDING_CONTROL(
     .fw_mux_1_sel(fw_mux_1_sel)
 );
 
-assign hazard_bubble = cpu_en & load_use_stall;
+assign hazard_bubble = load_use_stall;
 
 // Branch/jump redirection has priority over a simultaneous load-use stall.
-assign pc_write = cpu_en & ((~load_use_stall) | pipeline_flush_signal);
-assign if_id_stall = (~cpu_en) | hazard_bubble;
+assign pc_write = (~load_use_stall) | pipeline_flush_signal;
+assign if_id_stall = hazard_bubble;
 assign if_id_flush = pipeline_flush_signal;
-assign id_ex_stall = ~cpu_en;
+assign id_ex_stall = 1'b0;
 assign id_ex_flush = pipeline_flush_signal | hazard_bubble;
 
 endmodule

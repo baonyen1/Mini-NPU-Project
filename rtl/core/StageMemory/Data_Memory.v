@@ -3,7 +3,6 @@
 module Data_Memory(
     clk,
     reset,
-    cpu_en,
     read_enable,
     write_enable,
     data_format,
@@ -12,7 +11,7 @@ module Data_Memory(
     read_data
 );
 
-input clk, reset, cpu_en;
+input clk, reset;
 input read_enable, write_enable;
 input [2:0] data_format;
 input [9:0] address;
@@ -56,7 +55,7 @@ always @(posedge clk) begin
         read_format_q <= 3'b010;
         read_offset_q <= 2'b00;
     end
-    else if (cpu_en) begin
+    else begin
         if (byte_write_enable[0]) begin
             memory[word_addr][7:0] <= aligned_write_data[7:0];
         end

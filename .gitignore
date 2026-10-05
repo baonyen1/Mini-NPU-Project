@@ -13,3 +13,5 @@ xsim.dir/
 obj_dir/
 __pycache__/
 docs/references/*.pdf
+program.hex
+rtl_state.txt

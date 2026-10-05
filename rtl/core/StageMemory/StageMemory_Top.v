@@ -3,7 +3,6 @@
 module StageMemory_Top(
     clk,
     reset,
-    cpu_en,
 
     // input from EX/MEM
     Instruction_address_EX_MEM,
@@ -25,7 +24,7 @@ module StageMemory_Top(
     regfile_write_address_MEM_WB
 );
 
-input clk, reset, cpu_en;
+input clk, reset;
 
 input [31:0] Instruction_address_EX_MEM;
 input [31:0] alu_out_EX_MEM;
@@ -47,7 +46,6 @@ output [4:0] regfile_write_address_MEM_WB;
 LSU LOAD_STORE_UNIT(
     .clk(clk),
     .reset(reset),
-    .cpu_en(cpu_en),
     .read_enable(datamem_read_enable_EX_MEM),
     .write_enable(datamem_write_enable_EX_MEM),
     .data_format(data_format_EX_MEM),
@@ -59,7 +57,6 @@ LSU LOAD_STORE_UNIT(
 MEM_WB_Reg MEM_WB(
     .clk(clk),
     .reset(reset),
-    .cpu_en(cpu_en),
 
     .Instruction_address_EX_MEM(Instruction_address_EX_MEM),
     .alu_out_EX_MEM(alu_out_EX_MEM),

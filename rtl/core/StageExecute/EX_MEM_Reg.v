@@ -3,7 +3,6 @@
 module EX_MEM_Reg(
     clk,
     reset,
-    cpu_en,
 
     Instruction_address_ID_EX,
     alu_output,
@@ -26,7 +25,7 @@ module EX_MEM_Reg(
     regfile_write_address_EX_MEM
 );
 
-input clk, reset, cpu_en;
+input clk, reset;
 
 input [31:0] Instruction_address_ID_EX;
 input [31:0] alu_output;
@@ -60,7 +59,7 @@ always @(posedge clk) begin
         regfile_write_enable_EX_MEM <= 1'b0;
         regfile_write_address_EX_MEM <= 5'b0;
     end
-    else if (cpu_en) begin
+    else begin
         Instruction_address_EX_MEM <= Instruction_address_ID_EX;
         alu_out_EX_MEM             <= alu_output;
         datamem_wr_data_EX_MEM     <= datamem_wr_data;

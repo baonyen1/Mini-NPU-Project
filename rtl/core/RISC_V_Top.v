@@ -3,7 +3,6 @@
 module RISC_V_Top(
     clk,
     reset,
-    cpu_en,
 
     Instruction_IF_ID,
     Instruction_address_IF_ID,
@@ -12,14 +11,10 @@ module RISC_V_Top(
     Instruction_address_MEM_WB,
     alu_out_EX_MEM,
     regfile_write_data_WB,
-    jump_branch_signal,
-    workload_raw_util,
-    workload_valid,
-    workload_activity_q8
+    jump_branch_signal
 );
 
 input clk, reset;
-input cpu_en;
 
 output [31:0] Instruction_IF_ID;
 output [31:0] Instruction_address_IF_ID;
@@ -29,9 +24,6 @@ output [31:0] Instruction_address_MEM_WB;
 output [31:0] alu_out_EX_MEM;
 output [31:0] regfile_write_data_WB;
 output jump_branch_signal;
-output [2:0] workload_raw_util;
-output workload_valid;
-output [8:0] workload_activity_q8;
 
 wire [31:0] jump_branch_destination;
 
@@ -81,25 +73,7 @@ wire hazard_id_ex_flush;
 wire [2:0] fw_mux_0_sel;
 wire [2:0] fw_mux_1_sel;
 
-workload_monitor #(
-    .WINDOW_SAMPLES(32),
-    .LOW_MAX_Q8(64),
-    .MED_MAX_Q8(112),
-    .HIGH_MAX_Q8(160)
-) WORKLOAD_MONITOR (
-    .clk(clk),
-    .reset(reset),
-    .cpu_en(cpu_en),
-    .instruction(Instruction_IF_ID),
-    .load_use_stall(load_use_stall),
-    .pipeline_flush(pipeline_flush_signal),
-    .util_level(workload_raw_util),
-    .util_valid(workload_valid),
-    .activity_q8(workload_activity_q8)
-);
-
 Hazard_Unit HAZARD_UNIT(
-    .cpu_en(cpu_en),
     .pipeline_flush_signal(pipeline_flush_signal),
     .opcode_IF_ID(Instruction_IF_ID[6:0]),
     .regfile_read_address_0_IF_ID(Instruction_IF_ID[19:15]),
@@ -140,7 +114,6 @@ StageIF_TOP IF_STAGE(
 StageDecode_Top DECODE_STAGE(
     .clk(clk),
     .reset(reset),
-    .cpu_en(cpu_en),
     .stall(hazard_id_ex_stall),
     .flush(hazard_id_ex_flush),
 
@@ -176,7 +149,6 @@ StageDecode_Top DECODE_STAGE(
 StageExecute_Top EXECUTE_STAGE(
     .clk(clk),
     .reset(reset),
-    .cpu_en(cpu_en),
 
     .Instruction_address_ID_EX(Instruction_address_ID_EX),
     .regfile_out_0_ID_EX(regfile_out_0_ID_EX),
@@ -220,7 +192,6 @@ StageExecute_Top EXECUTE_STAGE(
 StageMemory_Top MEMORY_STAGE(
     .clk(clk),
     .reset(reset),
-    .cpu_en(cpu_en),
 
     .Instruction_address_EX_MEM(Instruction_address_EX_MEM),
     .alu_out_EX_MEM(alu_out_EX_MEM),

@@ -3,7 +3,6 @@
 module StageDecode_Top(
     clk,
     reset,
-    cpu_en,
     stall,
     flush,
 
@@ -39,7 +38,7 @@ module StageDecode_Top(
     writeback_mux_sel_ID_EX
 );
 
-input clk, reset, cpu_en, stall, flush;
+input clk, reset, stall, flush;
 
 input [31:0] Instruction_IF_ID;
 input [31:0] Instruction_address_IF_ID;
@@ -114,7 +113,6 @@ Controller CONTROLLER(
 Register_File REGFILE(
     .clk(clk),
     .reset(reset),
-    .cpu_en(cpu_en),
     .Rs1(regfile_read_address_0),
     .Rs2(regfile_read_address_1),
     .Rd(regfile_write_address_MEM_WB),

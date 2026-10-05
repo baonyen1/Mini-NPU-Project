@@ -1,7 +1,6 @@
 `timescale 1ns / 1ps
 
 module Flushing_Unit(
-    cpu_en,
     alu_branch,
     alu_branch_response,
     jump_flag,
@@ -9,7 +8,6 @@ module Flushing_Unit(
     flush_signal
 );
 
-input cpu_en;
 input alu_branch;
 input alu_branch_response;
 input jump_flag;
@@ -20,7 +18,7 @@ output flush_signal;
 wire branch_taken;
 
 assign branch_taken = alu_branch & alu_branch_response;
-assign jump_branch_signal = cpu_en & (jump_flag | branch_taken);
+assign jump_branch_signal = jump_flag | branch_taken;
 assign flush_signal = jump_branch_signal;
 
 endmodule

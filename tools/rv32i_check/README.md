@@ -29,8 +29,8 @@ Artifacts go to `build/` (assembly, objects, binaries, `sim.vvp`).
 - Memory model mirrors the current core: Harvard, 256-word IMEM, 256-word DMEM
   addressed by `addr[9:0]`. Update `ISS` in `run.py` when the memory map changes
   to the spec (ITCM 16 KB / DTCM 64 KB).
-- `stub_workload_monitor.v` is used only while `RISC_V_Top.v` still instantiates
-  `workload_monitor`. Delete the stub after removing that instance.
+- The Senior Project 1 DFS coupling (`workload_monitor`, `cpu_en`) is removed; the
+  harness builds `rtl/core` with no stub.
 - The random generator only uses instructions the core already supports. After
   adding the missing instructions, add them to `SUP_R` / `SUP_I` / the branch list
   in `tests_hazard.py`.

@@ -3,7 +3,6 @@
 module MEM_WB_Reg(
     clk,
     reset,
-    cpu_en,
 
     Instruction_address_EX_MEM,
     alu_out_EX_MEM,
@@ -18,7 +17,7 @@ module MEM_WB_Reg(
     regfile_write_address_MEM_WB
 );
 
-input clk, reset, cpu_en;
+input clk, reset;
 
 input [31:0] Instruction_address_EX_MEM;
 input [31:0] alu_out_EX_MEM;
@@ -40,7 +39,7 @@ always @(posedge clk) begin
         regfile_write_enable_MEM_WB <= 1'b0;
         regfile_write_address_MEM_WB <= 5'b0;
     end
-    else if (cpu_en) begin
+    else begin
         Instruction_address_MEM_WB <= Instruction_address_EX_MEM;
         alu_out_MEM_WB             <= alu_out_EX_MEM;
         writeback_mux_sel_MEM_WB   <= writeback_mux_sel_EX_MEM;
