@@ -1,0 +1,15 @@
+build/
+out/
+*.vcd
+*.fst
+*.wdb
+*.saif
+*.vvp
+xsim.dir/
+*.jou
+*.log
+*.pb
+.Xil/
+obj_dir/
+__pycache__/
+docs/references/*.pdf

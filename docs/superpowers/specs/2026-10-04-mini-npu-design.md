@@ -1,0 +1,491 @@
+# Mini-NPU Design Spec — A CoralNPU-Inspired RISC-V NPU
+
+- **Project:** Senior Project 2 (Đồ án 2), HCMUTE, class 23161FIE, advisor Phạm Văn Khoa
+- **Team:** Nguyễn Thế Bảo (23144002), Nguyễn Hoàng Công Tấn (23161064)
+- **Date:** 2026-10-04 · **Status:** draft for team review
+- **Source documents:** `Proposal_Senior_Project_2_MiniNPU_VI.docx`; CoralNPU repository `google-coral/coralnpu` at commit `382b5c1` (2026-10-02)
+
+This spec turns the proposal into a buildable design. It fixes interfaces and semantics so the two tracks can work in parallel. It says *what* each block must do and *how it will be proven*. It does not contain RTL, UVM code or firmware. The students write those.
+
+---
+
+## 1. Goal and success criteria
+
+Build a small NPU with these parts:
+
+1. The team's existing 5-stage RV32I core, extended to **RV32IM + Zicsr + Zifencei + Zbb**.
+2. Four custom instructions: **LOAD_WEIGHT, LOAD_INPUT, COMPUTE, READ_RESULT**. They dispatch through a command FIFO to a decoupled **4×4 int8 outer-product MAC engine**.
+3. A **64 KB dual-port DTCM** shared by the core and the engine.
+4. **Module-level clock gating** of the MAC engine. The design is built twice: **D0** without gating and **D1** with gating.
+
+All of it is verified with a self-built **SystemVerilog UVM** environment. It must run a **784-64-32-10 int8 MLP on MNIST** with outputs bit-exact against `golden_int8.py`.
+
+| # | Criterion | Acceptance |
+|---|---|---|
+| SC1 | Functional integrity | Every defined directed and random test passes with zero scoreboard mismatches and zero assertion failures, on D0 and D1. |
+| SC2 | Coverage | The coverage plan in §10.5 is closed on D0 before gating work starts (week 10). |
+| SC3 | D0/D1 equivalence | Same program gives an identical retire trace hash, identical `mcycle` and identical outputs (cycle-identical). Fallback: result-identical, with the reason documented. |
+| SC4 | Switching activity | Report the % change of D1 vs D0 for metrics M1 and M2 (§11) on synthetic and MNIST workloads. No target % is fixed in advance. |
+| SC5 | MNIST | RTL logits and labels match `golden_int8.py` bit-exactly on the chosen test subset. |
+| SC6 | Reproducibility | One command per flow regenerates the regression, coverage and switching-activity data. Tool versions and seeds are recorded in `manifest.yaml`. |
+
+**Evidence boundary.** Power numbers are *switching-activity estimates* from RTL simulation. They are never called "measured power". Functional evidence (UVM) and power evidence (toggles) are reported separately.
+
+## 2. Scope
+
+**In scope:**
+- core ISA extensions
+- the 4 custom instructions
+- the MAC engine (FIFO, operand buffers, PE array, accumulator, CSRs)
+- the dual-port DTCM, ITCM and simulation MMIO
+- the clock gating cell and the D1 configuration
+- three UVM environments, plus a C golden model and a C ISS
+- bare-metal firmware and the MNIST pipeline
+- the toggle-counting flow
+
+**Out of scope (deferred to the graduation thesis):**
+- RVV/Zve32x and the F extension
+- DMA, multiple accumulator tiles, a pipelined PE
+- FPGA synthesis and board bring-up
+- a compiler toolchain (IREE/TFLM)
+- frontdoor (bus) loading
+- LLM-assisted verification
+
+## 3. Decision log
+
+### 3.1 Decided
+
+| ID | Decision | Rationale |
+|---|---|---|
+| D1 | UVM 1.2 in SystemVerilog. Primary simulator: Vivado xsim 2024.1. Verilator is used for lint, fast full-system runs and VCD. | Real IEEE 1800.2 UVM; the team already has Vivado. |
+| D1a | If Verilator runs a minimal `uvm_test` in smoke test S6, consider running UVM and VCD on Verilator alone (single tool). Decide at the end of week 1. | CoralNPU's own UVM bench builds on Verilator (`tests/uvm/BUILD`, target `uvm_sim_verilator`). |
+| D2 | Extend the existing 5-stage pipelined RV32I core. | Already built by the team. |
+| D3 | Work is split by subsystem. **Track A**: core and `core_env`. **Track B**: MAC engine and `mac_env`. Both tracks share the SoC integration and `soc_env`. | Parallel work with a clean interface. |
+| D4 | "Coral, scaled down": the engine fetches operands from DTCM by itself into operand buffers, then accumulates into one 4×4 tile. | Mirrors Coral: `vle8` → vector regs → `vtmms` → tile → `vtmv`. |
+| D5 | Signed int8 × signed int8 → int32 accumulate. **Overflow wraps** (two's complement). | Matches `int32_t` in the C golden. ReLU outputs lie in [0,127], so signed covers them. |
+| D6 | The whole model lives in a 64 KB DTCM. No DMA. Closes open item 3. | Layout needs 56,816 B (§9.2). |
+| D7 | Data is loaded by backdoor `$readmemh` first. Closes open item 4. | Simplest working path. Frontdoor loading is thesis work. |
+| D8 | Golden ↔ scoreboard: DPI-C at block and system level; file comparison for MNIST. Closes open item 5. | Random tests need on-the-fly prediction. MNIST already has a Python golden. |
+| D9 | Clock gating is gated by hardware-detected idle on the MAC engine only. | Coral gates the whole core on WFI/CSR (`CoreAxi.scala`). Finer granularity is our contribution. |
+
+### 3.2 Open (the team decides; the default is used if no decision is recorded by the end of week 2)
+
+| ID | Question | Options | Default |
+|---|---|---|---|
+| O1 | Requantization between layers (open item 2) | **A**: multiply + shift + clamp (uses `mulh`, `max`/`min`). **B**: shift only. | A |
+| O2 | Exact requant and rounding formula | Must be copied verbatim from `golden_int8.py` into §9.3 in week 2 (task W2-3). | — |
+| O3 | xsim vs Verilator as the primary UVM simulator | See D1a. | xsim |
+
+## 4. System architecture
+
+```
+                 ┌──────────────────────── npu_top ─────────────────────────┐
+                 │                                                          │
+  ITCM 16KB ◄────┤  core (5-stage RV32IM+Zicsr+Zifencei+Zbb + custom-0)     │
+  0x0000_0000    │     │ IF │ ID │ EX │ MEM │ WB │                           │
+                 │                    │   ▲                                 │
+                 │       cmd push ────┘   │ READ_RESULT data                │
+                 │       (MEM stage)      │ + CSR 0x7C0/0x7C1               │
+                 │                ┌───────┴──────────────────────────┐      │
+                 │                │ mac_engine                       │      │
+                 │                │  free clk : cmd FIFO(8), FSM,    │      │
+                 │                │             CSRs, port-B ctrl    │      │
+                 │                │  clk_mac  : WBUF, IBUF (KMAX×32),│      │
+                 │                │             PE 4×4, acc 4×4×32   │      │
+                 │                │  icg_cell(en) → clk_mac          │      │
+                 │                └───────┬──────────────────────────┘      │
+                 │   LSU (port A, R/W)    │ port B (read-only)              │
+                 │          ▼             ▼                                 │
+                 │       DTCM 64 KB, true dual-port, 0x0001_0000           │
+                 │   SIM MMIO 0x0002_0000 (SIM_CTRL, SIM_PUTC) — tb only   │
+                 └──────────────────────────────────────────────────────────┘
+```
+
+### 4.1 Memory map
+
+| Base | Size | Region | Access |
+|---|---|---|---|
+| `0x0000_0000` | 16 KB | ITCM (firmware) | core IF read; backdoor load |
+| `0x0001_0000` | 64 KB | DTCM | port A: core LSU (R/W, byte enables); port B: engine (read-only) |
+| `0x0002_0000` | 4 B | `SIM_CTRL` (write-only) | `0x1` PASS, `0x2` FAIL, `0x10` BATCH_DONE, `0x20` MEAS_START, `0x21` MEAS_STOP |
+| `0x0002_0004` | 4 B | `SIM_PUTC` (write-only) | low byte printed to the simulation log |
+
+Any other address is an access fault. Behaviour is decided by the core's existing policy, which Track A documents in week 2 (W2-1).
+
+### 4.2 Parameters (`npu_pkg.sv`)
+
+| Name | Default | Notes |
+|---|---|---|
+| `PE_ROWS`, `PE_COLS` | 4, 4 | 8×8 only if time allows after SC1–SC3 |
+| `KMAX` | 1024 | depth of WBUF and IBUF (words) |
+| `FIFO_DEPTH` | 8 | same depth as Coral's command queue |
+| `GATING_EN` | 0 (D0) / 1 (D1) | the only RTL difference between D0 and D1 |
+| `DTCM_BASE`, `DTCM_BYTES` | `0x0001_0000`, 65536 | |
+
+## 5. Scalar core extensions (Track A)
+
+- **M.** `MUL`, `MULH`, `MULHSU`, `MULHU` execute in EX in 1 cycle (simulation only). `DIV`, `DIVU`, `REM`, `REMU` use an iterative radix-2 divider of about 32 cycles that stalls the pipeline. Required corner cases from the spec: divide by zero (quotient = all ones, remainder = dividend) and `-2^31 / -1` (quotient = `-2^31`, remainder = 0).
+- **Zicsr.** All six CSR instructions. CSRs:
+  - `mcycle`/`mcycleh` (0xB00/0xB80)
+  - `minstret`/`minstreth` (0xB02/0xB82), incremented at WB on retire
+  - user read-only aliases `cycle`/`instret` (0xC00/0xC02/0xC80/0xC82)
+  - `npu_status` (0x7C0) and `npu_busy_cyc` (0x7C1), forwarded to the engine (§6.4)
+  - CSR results go through the normal forwarding path.
+- **Zifencei.** `fence.i` flushes the pipeline and refetches. There is no I-cache. `fence` executes as a NOP.
+- **Zbb.** Full set:
+  - `andn orn xnor`
+  - `clz ctz cpop`
+  - `max maxu min minu`
+  - `sext.b sext.h zext.h`
+  - `rol ror rori`
+  - `orc.b rev8`
+- **Retire trace.** A retire-trace port in RVVI style for verification. Not synthesized logic in spirit, but kept in RTL under `` `ifdef RVVI_TRACE ``. Fields: `valid, order, pc, insn, rd, rd_wdata, mem_addr, mem_wdata, mem_wmask, trap`.
+
+## 6. Custom ISA (normative)
+
+### 6.1 Encoding
+
+All four instructions use opcode **custom-0 = `0001011`** in R-type format.
+
+| funct3 | Mnemonic | Operands | funct7 |
+|---|---|---|---|
+| `000` | `LOAD_WEIGHT` | `rs1` = DTCM byte address, `rs2` = K | `0000000` |
+| `001` | `LOAD_INPUT` | `rs1` = DTCM byte address, `rs2` = K | `0000000` |
+| `010` | `COMPUTE` | `rs1` = K; `funct7[0]` = clr | `000000c` |
+| `011` | `READ_RESULT` | `rd` ← acc[`rs1[3:0]`] | `0000000` |
+| `100`–`111` | (reserved) | — | — |
+
+`rd` must be `x0` for funct3 000–010; the hardware ignores the field. Non-zero `funct7` bits other than `COMPUTE`'s bit 0 are ignored. Assembler form: `.insn r 0x0B, <funct3>, <funct7>, rd, rs1, rs2`.
+
+### 6.2 Data format
+
+- A DTCM word is 4 int8 lanes. Lane *i* is bits `[8i+7:8i]` (lane 0 = LSB, little-endian).
+- `WBUF[k]` lane *i* = W[r₀+i][k], the weights of 4 output rows at input index k.
+- `IBUF[k]` lane *j* = x_j[k], input index k of image j (4 images per batch).
+- After COMPUTE, `acc[i][j]` holds the dot product of output row r₀+i with image j.
+- READ_RESULT index `idx = 4*i + j`.
+
+### 6.3 Semantics
+
+| Instruction | Effect |
+|---|---|
+| `LOAD_WEIGHT a, K` | for k in 0..K-1: `WBUF[k] ← DTCM[a + 4k]` |
+| `LOAD_INPUT a, K` | for k in 0..K-1: `IBUF[k] ← DTCM[a + 4k]` |
+| `COMPUTE K, clr` | `acc[i][j] ← (clr ? 0 : acc[i][j]) + Σ_{k<K} sext(WBUF[k].lane_i) · sext(IBUF[k].lane_j)`, arithmetic mod 2³² |
+| `READ_RESULT rd, idx` | `rd ← acc[idx/4][idx%4]` |
+
+**Ordering rules:**
+1. LOAD_WEIGHT, LOAD_INPUT and COMPUTE are pushed to the command FIFO in program order and executed in order, one at a time.
+2. The push happens when the instruction is in **MEM**. Every older store has therefore already written DTCM, so a RAW dependency through DTCM is safe without extra logic.
+3. A full FIFO stalls the pipeline at MEM.
+4. **READ_RESULT** stalls in MEM until `fifo_empty && fsm == IDLE`. It then returns data in WB like a load and reuses the load-use hazard logic. It is the only barrier.
+5. **Software rule (WAR):** firmware must not store to a DTCM word that a LOAD still queued or running will read. Satisfy this by issuing READ_RESULT, which drains the engine, before overwriting buffers. The rule is checked by assertion A-SOC-1 (§10.6).
+6. Bits `[1:0]` of the address are ignored (the address is word-aligned by truncation).
+
+**Error handling.** A command that violates a rule is dropped and sets a sticky bit in `npu_status`. Execution continues.
+
+| Condition | Effect |
+|---|---|
+| K = 0 (any op) | no operation, no error |
+| K > KMAX | dropped, `err_k` ← 1 |
+| LOAD with `a < DTCM_BASE` or `a + 4K > DTCM_BASE + DTCM_BYTES` | dropped, `err_addr` ← 1 |
+| funct3 ∈ {100..111} | the core pushes op `ILLEGAL`; the engine sets `err_illegal` ← 1 |
+| READ_RESULT with `rs1[31:4] ≠ 0` | upper bits ignored, no error |
+
+### 6.4 CSRs
+
+The CSRs are implemented in the engine and accessed by the core's CSR unit over the CSR port (§7.1).
+
+`npu_status` (0x7C0):
+
+| Bits | Name | Access | Meaning |
+|---|---|---|---|
+| 0 | `busy` | RO | `fsm != IDLE` |
+| 1 | `fifo_empty` | RO | |
+| 2 | `fifo_full` | RO | |
+| 8 | `err_k` | W1C, sticky | |
+| 9 | `err_addr` | W1C, sticky | |
+| 10 | `err_illegal` | W1C, sticky | |
+| others | — | RO 0 | |
+
+`npu_busy_cyc` (0x7C1): a 32-bit counter of cycles with `fsm != IDLE`. It runs on the free clock. A CSR write sets its value.
+
+## 7. MAC engine microarchitecture (Track B)
+
+### 7.1 Interfaces (frozen at the end of week 2)
+
+```
+// command push (core MEM stage → engine), free clock domain
+input  cmd_valid; output cmd_ready;          // ready = !fifo_full
+input  [1:0] cmd_op;                          // 0 LDW, 1 LDI, 2 MAC, 3 ILLEGAL
+input  [31:0] cmd_addr; input [31:0] cmd_k; input cmd_clr;
+// result read (core MEM stage)
+input  rd_req; input [3:0] rd_idx;
+output rd_ready;                              // fifo_empty && fsm==IDLE
+output [31:0] rd_data;                        // valid when rd_req && rd_ready
+// CSR port
+input  csr_we; input [11:0] csr_addr; input [31:0] csr_wdata; output [31:0] csr_rdata;
+// DTCM port B (read-only, 1-cycle latency)
+output b_req; output [13:0] b_addr;           // word index within DTCM
+input  [31:0] b_rdata;                        // valid the cycle after b_req
+// clocks
+input clk, rst_n;                             // free clock
+```
+
+### 7.2 Behaviour
+
+- **FSM states:** `IDLE`, `CHECK`, `LOAD`, `MAC`. In `CHECK` the head command is popped and validated (§6.3 error table). A valid LOAD goes to `LOAD`: it streams K reads on port B and writes WBUF or IBUF. A valid MAC goes to `MAC`: it reads `WBUF[k]` and `IBUF[k]` and updates all 16 accumulators each cycle.
+- **Latency:** each command must finish within K + 3 cycles of being popped. The exact count is documented by Track B in `docs/mac_engine.md`. The UVM scoreboard checks values, not latency. Latency is only constrained by the timeout assertion A-MAC-5.
+- **PE:** one cycle per MAC step (no pipelining in Senior Project 2): `acc_ij <= acc_ij + sext8(a_i) * sext8(b_j)`. When clr is set, the first step loads the product instead of adding it.
+- **Buffers:** synchronous single-port RAM arrays, written in `LOAD` and read in `MAC`. They are never accessed at the same time because only one command runs at a time.
+  - Buffers are **not reset** and keep their contents between commands.
+  - COMPUTE reads entries 0..K-1 whatever the last LOAD's K was.
+  - Reading an entry never written since reset is a test error, not a DUT error. Random sequences are constrained so that COMPUTE's K never exceeds the smallest number of entries written since reset in WBUF or IBUF. The predictor raises `UVM_ERROR` if a sequence breaks this rule.
+
+### 7.3 Clock domains
+
+| Free clock `clk` | Gated clock `clk_mac` |
+|---|---|
+| cmd FIFO, FSM, CSRs, `npu_busy_cyc`, port-B request and address counter | WBUF, IBUF, PE datapath registers, the 16 accumulators |
+
+READ_RESULT reads the accumulators combinationally. They hold their value while gated.
+
+## 8. Clock gating (D0/D1)
+
+- `icg_cell`: a latch transparent while `clk` is low, followed by an AND gate.
+  ```
+  always_latch if (!clk) en_l = en | test_en;
+  assign gclk = clk & en_l;
+  ```
+  The team writes it themselves. It follows the same pattern as CoralNPU `hdl/verilog/ClockGate.sv`, default branch. Add the `/* verilator clock_enable */` pragma on the latch output. For the thesis FPGA, a `BUFGCE` variant goes behind `` `ifdef FPGA_XILINX ``.
+- **Enable:** `en = !rst_n_sync || (fsm != IDLE) || !fifo_empty`.
+  - The `!rst_n_sync` term keeps the clock running during reset, so synchronous resets in the gated domain still take effect.
+  - The other terms come straight from registers, so `en` is glitch-free at the latch. A push at cycle *t* makes `fifo_empty` low at *t+1*. The latch opens during the low phase of *t+1*, and the first gated edge arrives at *t+2*, exactly when the FSM first needs the datapath. **Gating therefore adds no cycles, so cycle-identical D0/D1 is achievable (SC3).**
+- **D0:** `GATING_EN = 0`, so `en` is tied to 1 inside `icg_cell` and the instance stays. D0 and D1 have the same hierarchy and the same netlist apart from that tie.
+- **Safety invariant (assertion A-GATE-1):** `(fsm != IDLE || !fifo_empty) |-> en`.
+
+## 9. Firmware and MNIST pipeline
+
+### 9.1 Build
+
+- Bare-metal C with `crt0.S` and `link.ld` (ITCM for `.text`; DTCM for `.data`, `.bss` and the stack).
+- Flags: `-march=rv32im_zicsr_zifencei_zbb -mabi=ilp32 -O2`.
+- Toolchain candidate: xPack `riscv-none-elf-gcc` (Zbb support to be confirmed in S5).
+- `npu.h` exposes `npu_load_w(addr,k)`, `npu_load_i(addr,k)`, `npu_compute(k,clr)` and `npu_read(idx)` as `.insn` inline-assembly wrappers. All except `npu_read` carry a `"memory"` clobber.
+- ELF → `itcm.hex` / `dtcm.hex` for `$readmemh`.
+
+### 9.2 DTCM layout (4-image batch)
+
+| Symbol | Content | Words | Bytes | Address range |
+|---|---|---|---|---|
+| W1 | 16 tiles × 784 (packed per §6.2) | 12,544 | 50,176 | `0x1_0000–0x1_C3FF` |
+| W2 | 8 tiles × 64 | 512 | 2,048 | `0x1_C400–0x1_CBFF` |
+| W3 | 3 tiles × 32 (10 rows padded to 12 with zeros) | 96 | 384 | `0x1_CC00–0x1_CD7F` |
+| B1, B2, B3 | int32 bias, 64 + 32 + 12 | 108 | 432 | `0x1_CD80–0x1_CF2F` |
+| QP | requant parameters | 16 | 64 | `0x1_CF30–0x1_CF6F` |
+| X | layer-1 input, 784 words × 4 images | 784 | 3,136 | `0x1_CF70–0x1_DBAF` |
+| ACT1 | layer-1 output, 64 words | 64 | 256 | `0x1_DBB0–0x1_DCAF` |
+| ACT2 | layer-2 output, 32 words | 32 | 128 | `0x1_DCB0–0x1_DD2F` |
+| LOGITS | int32, 12 rows × 4 images | 48 | 192 | `0x1_DD30–0x1_DDEF` |
+| MAILBOX | TB→FW "next batch ready" flag | 1 | 4 | `0x1_DDF0–0x1_DDF3` |
+| free / stack | | | 8,716 | `0x1_DDF4–0x1_FFFF` |
+
+The data region totals 56,816 B. `pack_weights.py` generates this image and its linker symbols. The exact symbol addresses are taken from the linker map, not hard-coded.
+
+### 9.3 Per-layer loop (reference algorithm)
+
+```
+npu_load_i(IN, K)                              // once per layer; IBUF reused across tiles
+for t in 0 .. N_out/4 - 1:
+    npu_load_w(W + t*4K, K)
+    npu_compute(K, clr=1)
+    for i in 0..3, j in 0..3:
+        v = npu_read(4*i + j) + B[4t + i]
+        out[i][j] = requant(v)                 // per O1/O2; final layer keeps int32
+    for i in 0..3: OUT[4t + i] = pack(out[i][0..3])   // one word = 4 images
+```
+
+`requant()` must be **bit-identical** to `golden_int8.py`, including rounding, shift direction and clamp bounds. Task W2-3 copies the exact formula here. The final layer writes int32 logits to LOGITS. Argmax is computed by both the testbench and the golden.
+
+### 9.4 Batch protocol
+
+1. The firmware runs one batch.
+2. It writes `SIM_CTRL = BATCH_DONE`.
+3. The testbench reads LOGITS by backdoor, compares them with the golden file, loads the next X by backdoor, and sets MAILBOX = 1.
+4. The firmware polls MAILBOX, clears it and continues.
+
+The last READ_RESULT has already drained the engine before step 2, so the backdoor write of X cannot violate the WAR rule.
+
+## 10. Verification architecture
+
+### 10.1 Environments
+
+| Env | DUT | Owner | Agents and components |
+|---|---|---|---|
+| `mac_env` | `mac_engine` | B | `cmd_agent` (active: push, read, CSR); `dtcm_agent` (reactive responder holding a 16K-word memory model); predictor calling `npu_ref` (DPI-C); scoreboard; coverage; SVA bound to the DUT |
+| `core_env` | core + ITCM + DTCM, engine replaced by a stub (always ready, logs commands, returns `rd_data = idx`, CSR reads return 0) | A | `rvvi_monitor`; lockstep checker calling `rv_iss` (DPI-C); instruction-stream sequences that backdoor-load ITCM; per-extension covergroups |
+| `soc_env` | `npu_top` | A+B | `rvvi_monitor` with lockstep `rv_iss` (whose custom instructions call `npu_ref`, so the whole system is predicted); `fifo_monitor`; `sim_ctrl_monitor`; MNIST file comparator; D0/D1 equivalence harness |
+
+### 10.2 Golden models (C, compiled for DPI-C and as standalone unit-test executables)
+
+**`npu_ref.c`:**
+- `npu_ref_reset()`
+- `npu_ref_mem_write(word_idx, data)`
+- `npu_ref_cmd(op, addr, k, clr)`
+- `npu_ref_read(idx)`
+- `npu_ref_status()`
+- `npu_ref_csr_write(addr, data)`
+
+The reference keeps its own DTCM image. Every sequence that writes the responder memory also calls `npu_ref_mem_write`.
+
+**`rv_iss.c`:** an RV32IM + Zicsr + Zifencei + Zbb + custom-0 instruction-set simulator.
+- API: `iss_init(itcm, dtcm)` and `iss_step(&rec)`, which returns the expected retire record.
+- Not modelled: `mcycle` values (the comparison masks CSR reads of 0xB00/0xB80/0xC00/0xC80 and `npu_busy_cyc`).
+- Modes: `ISS_STUB` (for `core_env`; custom instructions mirror the stub, so READ_RESULT returns `idx` and reads of 0x7C0/0x7C1 return 0) and `ISS_FULL` (for `soc_env`; custom instructions call `npu_ref`).
+
+**Gate before use:** each golden model must pass its own unit tests before it is used as an oracle. For `npu_ref` these include hand-computed 4×4 cases, wrap on overflow and every error case. For `rv_iss` they include the instruction corner cases and riscv-arch-test signatures where available.
+
+### 10.3 Test list (minimum)
+
+| Env | Directed | Random |
+|---|---|---|
+| mac | single LDW/LDI/MAC with K=1; K=KMAX; K=0; K=KMAX+1; out-of-range address; illegal op; clr vs accumulate; forced wrap (repeated accumulate with ±128·±128 operands); FIFO fill to full with back-to-back pushes; READ while busy; W1C clear of error bits | `mac_rand_seq`: random op mix, K ∈ weighted bins, random operands with corner-value bias, random inter-command gaps (0–20 cycles), ≥ 200 seeds |
+| core | per instruction: every M/Zbb/Zicsr/Zifencei instruction including div corners; hazard distance 1/2/3 for each forwarding path; load-use; custom-instruction decode and push timing (with stub); FIFO-full stall (stub with `ready = 0`) | `core_rand_seq`: random ALU/M/Zbb streams with controlled dependency distance, then streams with branches; ≥ 200 seeds |
+| soc | one firmware test per custom instruction; WAR-violation negative test (expects A-SOC-1 to fire); 4×4×K matmul vs `npu_ref`; full layer-sized matmul (784×64); MNIST N batches | `soc_rand_matmul`: Python generates random M×K×N int8 matrices plus firmware data from a seed |
+
+### 10.4 D0/D1 equivalence harness
+
+Run the identical test with the same binary and seed on `GATING_EN=0` and on `GATING_EN=1`. Compare:
+- the SHA-256 of the RVVI retire log
+- final `mcycle` and `minstret`
+- the LOGITS dump
+
+Every soc test and every MNIST run is executed in both configurations. Any difference is a failure (SC3).
+
+### 10.5 Coverage plan (all bins declared before week 7; closure required before week 10)
+
+| Group | Bins |
+|---|---|
+| `cg_cmd` | op {LDW, LDI, MAC, ILLEGAL} × K {0, 1, 2–15, 16–KMAX-1, KMAX, >KMAX}; MAC × clr {0, 1} × acc-nonzero-before {0, 1} |
+| `cg_operand` | per lane, value ∈ {-128, -1, 0, 1, 127, other} for WBUF and IBUF |
+| `cg_fifo` | occupancy at push {0, 1, 2–6, 7, 8=full}; push-while-full (stall) observed |
+| `cg_state` | transitions IDLE→CHECK, CHECK→LOAD, CHECK→MAC, CHECK→IDLE (dropped), LOAD→IDLE, MAC→IDLE; READ arriving while busy |
+| `cg_acc` | accumulate result wraps positive→negative and negative→positive |
+| `cg_err` | each error bit set; set while already set; W1C clear |
+| `cg_addr` | LOAD touching the first DTCM word, the last DTCM word, one word past the end |
+| `cg_gate` (D1 only) | en rise, en fall, en low for 1 cycle, en low for ≥ 100 cycles |
+| core `Cvgrp_*` | per extension: every opcode; rd = x0 and rd ≠ x0; rs1 = rs2; forwarding source {EX/MEM, MEM/WB, none}; DIV {÷0, overflow, normal}; CSR {rw, rs, rc, imm variants} × {0xB00, 0xB02, 0x7C0, 0x7C1} |
+
+### 10.6 Assertions (SVA)
+
+| ID | Property |
+|---|---|
+| A-MAC-1 | no FIFO push while full; no pop while empty |
+| A-MAC-2 | `rd_ready |-> (fifo_empty && fsm==IDLE)` |
+| A-MAC-3 | `b_req` only in `LOAD`; `b_addr` stays within DTCM |
+| A-MAC-4 | buffers are never written outside `LOAD` |
+| A-MAC-5 | every popped command returns to IDLE within K + 3 cycles |
+| A-GATE-1 | `(fsm != IDLE || !fifo_empty) |-> en` (never gate pending work) |
+| A-GATE-2 | when `GATING_EN = 1` and `en_l = 0`, `clk_mac` stays low |
+| A-SOC-1 | a port-A store to word *w* while a queued or running LOAD covers *w* is a WAR violation (error) |
+| A-CORE-1 | while READ_RESULT stalls in MEM, no younger instruction writes back |
+
+## 11. Switching-activity methodology
+
+**Workloads:**
+- **Synthetic** firmware that alternates NPU bursts (LDW + LDI + MAC with K=256) with scalar busy-loops. Idle ratios are 10, 25, 50, 75 and 90 % (measured by `npu_busy_cyc / mcycle`).
+- **MNIST**, N batches.
+
+**Window:** firmware writes `SIM_CTRL = MEAS_START` and `MEAS_STOP`. VCD/FST dumping is enabled only inside the window and only for the scope `npu_top.u_mac_engine`.
+
+**Metrics:**
+- **M1:** toggle count on the net `clk_mac`.
+- **M2:** sum of toggle counts over all nets in `u_mac_engine`, split into M2-free and M2-gated.
+- Both are reported per 1,000 cycles. Note that M1 is roughly proportional to the busy fraction, while M2 reflects real data activity.
+
+**Fairness:** D0 and D1 use the same binary, the same simulator version and the same dump options. Each configuration is run once; reruns happen only after a logged external failure.
+
+**Tooling:** `power/toggle_count.py` reads the VCD, writes CSV, and `power/plots.py` produces the figures. Every figure states the configuration, workload, seed and unit, and is labelled "switching-activity estimate". One xsim VCD run cross-checks the Verilator counts.
+
+## 12. Tools, repository and reproducibility
+
+```
+mini-npu/
+  rtl/{core,npu,mem,top}/   rtl/npu/icg_cell.sv   rtl/npu_pkg.sv
+  tb/uvm/{common,mac_env,core_env,soc_env}/   tb/sva/
+  model/c/{npu_ref.c,rv_iss.c,tests/}   model/py/{golden_int8.py,pack_weights.py,gen_matmul.py}
+  sw/{crt0.S,link.ld,npu.h,tests/,mnist/,synthetic/}
+  sim/xsim/   sim/verilator/   power/   notebooks/   docs/
+  manifest.yaml   Makefile (or run.py)
+```
+
+- `manifest.yaml` records the Vivado, Verilator, GCC and Python versions, the git hash, seeds and the test list.
+- The regression entry point prints pass/fail per test × seed and merges coverage.
+- Raw logs and VCDs are kept under `out/<date>/<config>/`. Large files are not committed; their hashes are recorded instead.
+
+## 13. Week-1 smoke-test gate
+
+Each item is answered "works / does not work, with evidence (log)". The proposal (Tables 1, 3, 9, 11 and 12) is updated after this gate.
+
+| ID | Check |
+|---|---|
+| S1 | xsim 2024.1 compiles and runs a minimal `uvm_test` (`-L uvm`), and `` `uvm_info `` prints |
+| S2 | xsim calls a C function through DPI-C (`import "DPI-C"`), passing ints and a `bit [31:0]` |
+| S3 | xsim functional coverage (a covergroup) produces a report (tool name to be confirmed; candidate `xcrg`) |
+| S4 | Verilator lints a toy design; simulates an `icg_cell` with a latch and dumps VCD in which `gclk` stops while `en = 0` |
+| S5 | the GCC toolchain assembles a Zbb instruction (`max`) and a `.insn r 0x0B, ...`; objcopy produces a `$readmemh` hex |
+| S6 | (D1a) Verilator compiles a minimal UVM 1.2 test |
+| S7 | xsim dumps a VCD for a chosen scope over a chosen time window |
+
+## 14. Ownership and schedule outline
+
+| Weeks | Track A (core) | Track B (MAC engine) | Joint |
+|---|---|---|---|
+| 1 | S1–S7 (split) | S1–S7 (split) | gate review |
+| 2 | ISA and encoding doc, CSR map, trap/fault policy | engine interface freeze (§7.1), `npu_ref` + unit tests | sign off §6 and §7.1 |
+| 3–4 | M, Zicsr, Zifencei, Zbb, custom decode/push; `rv_iss` + unit tests | `mac_engine` RTL (D0); `mac_env` skeleton | |
+| 5–6 | `core_env` + directed tests | `mac_env` directed tests | `npu_top` integration, first soc test |
+| 7–9 | core random + coverage | mac random + coverage | soc tests, coverage closure (SC2) |
+| 10–11 | — | `icg_cell`, D1 | equivalence harness, D1 regression (SC3) |
+| 12 | synthetic firmware | `toggle_count.py` | E2 data |
+| 13–14 | MNIST firmware | `pack_weights.py` | MNIST bit-exact (SC5) |
+| 15 | | | E4 MNIST toggles |
+| 16 | | | report, slides, reproducibility package |
+
+The detailed task-level plan (with "done" tests per task) is written next in `docs/superpowers/plans/`.
+
+## 15. Risks
+
+| Risk | Mitigation |
+|---|---|
+| xsim lacks a feature (UVM/DPI/coverage) | Found in week 1 (S1–S3). Fallback: Verilator UVM (S6). Last resort: pyuvm. |
+| `rv_iss` is late, blocking `core_env` | Keep the ISS minimal and test it first. Interim: riscv-arch-test self-checking signatures as directed tests. |
+| Interface churn between tracks | Freeze §6 and §7.1 at the end of week 2. Changes after that need both students' sign-off and a spec update. |
+| DTCM WAR bugs in firmware | Software rule plus A-SOC-1, and a negative test that proves the assertion fires. |
+| Requant mismatch with golden | O2: copy the formula verbatim; unit-test the firmware `requant()` on the host against `golden_int8.py`. |
+| Schedule pressure | Protect the order D0 correct → D1 equivalent → switching activity → MNIST. 8×8 and pipelining are dropped first. |
+
+## 16. Relation to CoralNPU (contribution boundary)
+
+| Aspect | CoralNPU (`VmeCoreMini`, commit `382b5c1`) | Mini-NPU |
+|---|---|---|
+| Scalar core | 4-lane superscalar, in-order, Chisel | the team's 5-stage pipeline, Verilog/SV |
+| ISA | RV32IMF_Zba_Zbb_Zicsr_Zifencei + RVV 1.0 + Zvt (experimental) | RV32IM_Zicsr_Zifencei_Zbb + 4 custom-0 instructions |
+| Command path | scalar dispatch → 8-entry command queue → decoupled backend | MEM-stage push → 8-entry FIFO → decoupled engine |
+| Operand staging | `vle8` from DTCM into a 32×128-bit vector register file | engine LOAD from DTCM into WBUF/IBUF |
+| Matrix compute | PE array, 16 tiles `mt0..mt15`, INT8/FP32/BF16 | 4×4 int8 PE, 1 tile |
+| Result path | `vtmv.v.t` then `vse32` | READ_RESULT to a scalar register |
+| Memory | banked DTCM + crossbar, 32 KB default | true dual-port DTCM, 64 KB |
+| Clock gating | whole-core gate on WFI/CSR (`CoreAxi.scala`) | MAC-engine gate on hardware-detected idle |
+| Verification | UVM on VCS/Verilator, RVVI agent, Spike cosim | self-built UVM, RVVI-style trace, own C ISS and C NPU model |
+
+No CoralNPU RTL or testbench code is reused. CoralNPU is cited as the architectural inspiration, and its source files are cited where a pattern was studied (`ClockGate.sv`, `tests/uvm` structure, `vme_matmul_test_program.cc`).
+
+## 17. References
+
+- Proposal references [1]–[12] apply.
+- Google, `google-coral/coralnpu`, commit `382b5c1`: `doc/overview.md`, `doc/microarch/*.md`, `hdl/verilog/ClockGate.sv`, `hdl/chisel/src/coralnpu/CoreAxi.scala`, `hdl/verilog/rvv/design/Zvt/`, `tests/uvm/README.md`, `tests/cocotb/vme_test/vme_matmul_test_program.cc`.
+- Google, Coral NPU developer guides: Architecture overview; ML inference execution engines; Datasheet; Instruction decode and dispatch (developers.google.com/coral/guides).
+- [PH] D. A. Patterson, J. L. Hennessy, *Computer Organization and Design: The Hardware/Software Interface, RISC-V Edition*, 2nd ed., Morgan Kaufmann, 2021.
+- [ST] W. Stallings, *Computer Organization and Architecture: Designing for Performance*, 11th ed., Pearson, 2019.
+- Chapter-to-task reading guide: `docs/references/README.md`.
