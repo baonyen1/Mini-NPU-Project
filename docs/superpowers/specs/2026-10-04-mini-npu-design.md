@@ -2,6 +2,7 @@
 
 - **Project:** Senior Project 2 (Đồ án 2), HCMUTE, class 23161FIE, advisor Phạm Văn Khoa
 - **Team:** Nguyễn Thế Bảo (23144002), Nguyễn Hoàng Công Tấn (23161064)
+- **Repository:** https://github.com/baonyen1/Mini-NPU-Project
 - **Date:** 2026-10-04 · **Status:** draft for team review
 - **Source documents:** `Proposal_Senior_Project_2_MiniNPU_VI.docx`; CoralNPU repository `google-coral/coralnpu` at commit `382b5c1` (2026-10-02)
 

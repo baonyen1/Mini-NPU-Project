@@ -1,6 +1,7 @@
 # Mini-NPU — Senior Project 2 (HCMUTE)
 
 A CoralNPU-inspired RISC-V NPU: power-aware design and UVM-based functional verification.
+Repository: https://github.com/baonyen1/Mini-NPU-Project
 Design spec: `docs/superpowers/specs/2026-10-04-mini-npu-design.md`.
 
 ```
