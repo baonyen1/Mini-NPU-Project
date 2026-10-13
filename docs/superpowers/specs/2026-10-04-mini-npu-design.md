@@ -3,7 +3,7 @@
 - **Project:** Senior Project 2 (Đồ án 2), HCMUTE, class 23161FIE, advisor Phạm Văn Khoa
 - **Team:** Nguyễn Thế Bảo (23144002), Nguyễn Hoàng Công Tấn (23161064)
 - **Repository:** https://github.com/baonyen1/Mini-NPU-Project
-- **Date:** 2026-10-04 · **Status:** draft for team review
+- **Date:** 2026-10-04 (rev. 2026-10-14: QuestaSim, requant formula, model size confirmed) · **Status:** approved; §6/§7.1 freeze pending
 - **Source documents:** `Proposal_Senior_Project_2_MiniNPU_VI.docx`; CoralNPU repository `google-coral/coralnpu` at commit `382b5c1` (2026-10-02)
 
 This spec turns the proposal into a buildable design. It fixes interfaces and semantics so the two tracks can work in parallel. It says *what* each block must do and *how it will be proven*. It does not contain RTL, UVM code or firmware. The students write those.
@@ -58,8 +58,8 @@ All of it is verified with a self-built **SystemVerilog UVM** environment. It mu
 
 | ID | Decision | Rationale |
 |---|---|---|
-| D1 | UVM 1.2 in SystemVerilog. Primary simulator: Vivado xsim 2024.1. Verilator is used for lint, fast full-system runs and VCD. | Real IEEE 1800.2 UVM; the team already has Vivado. |
-| D1a | If Verilator runs a minimal `uvm_test` in smoke test S6, consider running UVM and VCD on Verilator alone (single tool). Decide at the end of week 1. | CoralNPU's own UVM bench builds on Verilator (`tests/uvm/BUILD`, target `uvm_sim_verilator`). |
+| D1 | UVM 1.2 (IEEE 1800.2) in SystemVerilog. **Primary simulator: Siemens QuestaSim** (team decision 2026-10-14). Fallback: Vivado xsim 2024.1. Verilator is used for lint and fast full-system runs. | Industry-standard UVM simulator with built-in UVM, DPI-C and coverage. **Requires a full QuestaSim licence:** the free Questa–Intel/Altera FPGA (Starter) editions do not support `randomize`/`covergroup` (Altera forum, see §17), so a UVM bench with constrained random and coverage will not run there. Confirmed or refuted by S1–S3. |
+| D1a | Switching-activity VCDs for D0/D1 come from **one** simulator for both configurations: QuestaSim by default; Verilator only if Questa run time for MNIST is too long (decide after the first MNIST run). | D0/D1 fairness (§11) needs identical tooling. |
 | D2 | Extend the existing 5-stage pipelined RV32I core. | Already built by the team. |
 | D3 | Work is split by subsystem. **Track A**: core and `core_env`. **Track B**: MAC engine and `mac_env`. Both tracks share the SoC integration and `soc_env`. | Parallel work with a clean interface. |
 | D4 | "Coral, scaled down": the engine fetches operands from DTCM by itself into operand buffers, then accumulates into one 4×4 tile. | Mirrors Coral: `vle8` → vector regs → `vtmms` → tile → `vtmv`. |
@@ -73,9 +73,9 @@ All of it is verified with a self-built **SystemVerilog UVM** environment. It mu
 
 | ID | Question | Options | Default |
 |---|---|---|---|
-| O1 | Requantization between layers (open item 2) | **A**: multiply + shift + clamp (uses `mulh`, `max`/`min`). **B**: shift only. | A |
-| O2 | Exact requant and rounding formula | Must be copied verbatim from `golden_int8.py` into §9.3 in week 2 (task W2-3). | — |
-| O3 | xsim vs Verilator as the primary UVM simulator | See D1a. | xsim |
+| O1 | Requantization between layers (open item 2) | **A**: multiply + shift + clamp (`mul`, `srai`, `max`/`min`). **B**: shift only. | A (this is what `notebooks/MiniNPU_MLP.py` implements; confirm) |
+| O2 | Exact requant formula | Formula recorded in §9.3 from the notebook. The per-layer `M`, `S` values come from the retrained 784-64-32-10 model (`requant.json`). | formula fixed, values pending retrain |
+| O3 | QuestaSim licence available to the team (lab or university licence, not the FPGA Starter edition) | S1–S3 on the actual licence. If `randomize`/`covergroup` fail, fall back to xsim. | QuestaSim |
 
 ## 4. System architecture
 
@@ -291,7 +291,7 @@ READ_RESULT reads the accumulators combinationally. They hold their value while 
 | MAILBOX | TB→FW "next batch ready" flag | 1 | 4 | `0x1_DDF0–0x1_DDF3` |
 | free / stack | | | 8,716 | `0x1_DDF4–0x1_FFFF` |
 
-The data region totals 56,816 B. `pack_weights.py` generates this image and its linker symbols. The exact symbol addresses are taken from the linker map, not hard-coded.
+The data region totals 56,816 B. Model is **784-64-32-10** (decision 2026-10-14); the notebook currently trains 784-32-16-10 and must be retrained before `pack_weights.py` generates this image. `pack_weights.py` generates this image and its linker symbols. The exact symbol addresses are taken from the linker map, not hard-coded.
 
 ### 9.3 Per-layer loop (reference algorithm)
 
@@ -306,7 +306,14 @@ for t in 0 .. N_out/4 - 1:
     for i in 0..3: OUT[4t + i] = pack(out[i][0..3])   // one word = 4 images
 ```
 
-`requant()` must be **bit-identical** to `golden_int8.py`, including rounding, shift direction and clamp bounds. Task W2-3 copies the exact formula here. The final layer writes int32 logits to LOGITS. Argmax is computed by both the testbench and the golden.
+`requant()` must be **bit-identical** to the golden model. Formula (from `notebooks/MiniNPU_MLP.py`, functions `requant` and `find_ms`):
+
+```
+acc = Σ x·w + b_q                       // bias added before requant (int32)
+y   = clamp((acc * M + 2^(S-1)) >>> S, 0, 127)   // arithmetic shift; clamp 0 also acts as ReLU
+```
+
+`find_ms` chooses the largest `S` with `M ≥ 1` and `bound·M + 2^(S−1) ≤ 2³¹−1`, where `bound = max_j (Σ|w_q[j]|·127 + |b_q[j]|)`. The product therefore never overflows int32, so firmware needs only `mul` (low 32 bits), `add`, `srai`, `max`, `min`; `mulh` is not required. Weights are quantised to ±127 (−128 never occurs). Per-layer `M`, `S` live in the QP region of DTCM. The final layer writes int32 logits to LOGITS. Argmax is computed by both the testbench and the golden.
 
 ### 9.4 Batch protocol
 
@@ -406,7 +413,7 @@ Every soc test and every MNIST run is executed in both configurations. Any diffe
 
 **Fairness:** D0 and D1 use the same binary, the same simulator version and the same dump options. Each configuration is run once; reruns happen only after a logged external failure.
 
-**Tooling:** `power/toggle_count.py` reads the VCD, writes CSV, and `power/plots.py` produces the figures. Every figure states the configuration, workload, seed and unit, and is labelled "switching-activity estimate". One xsim VCD run cross-checks the Verilator counts.
+**Tooling:** `power/toggle_count.py` reads the VCD, writes CSV, and `power/plots.py` produces the figures. Every figure states the configuration, workload, seed and unit, and is labelled "switching-activity estimate". If a run is ever taken on Verilator (D1a), one QuestaSim VCD run of the same workload cross-checks the counts.
 
 ## 12. Tools, repository and reproducibility
 
@@ -416,11 +423,11 @@ mini-npu/
   tb/uvm/{common,mac_env,core_env,soc_env}/   tb/sva/
   model/c/{npu_ref.c,rv_iss.c,tests/}   model/py/{golden_int8.py,pack_weights.py,gen_matmul.py}
   sw/{crt0.S,link.ld,npu.h,tests/,mnist/,synthetic/}
-  sim/xsim/   sim/verilator/   power/   notebooks/   docs/
+  sim/questa/   sim/verilator/   power/   notebooks/   docs/
   manifest.yaml   Makefile (or run.py)
 ```
 
-- `manifest.yaml` records the Vivado, Verilator, GCC and Python versions, the git hash, seeds and the test list.
+- `manifest.yaml` records the QuestaSim (and licence type), Vivado, Verilator, GCC and Python versions, the git hash, seeds and the test list.
 - The regression entry point prints pass/fail per test × seed and merges coverage.
 - Raw logs and VCDs are kept under `out/<date>/<config>/`. Large files are not committed; their hashes are recorded instead.
 
@@ -430,13 +437,13 @@ Each item is answered "works / does not work, with evidence (log)". The proposal
 
 | ID | Check |
 |---|---|
-| S1 | xsim 2024.1 compiles and runs a minimal `uvm_test` (`-L uvm`), and `` `uvm_info `` prints |
-| S2 | xsim calls a C function through DPI-C (`import "DPI-C"`), passing ints and a `bit [31:0]` |
-| S3 | xsim functional coverage (a covergroup) produces a report (tool name to be confirmed; candidate `xcrg`) |
+| S1 | QuestaSim compiles and runs a minimal `uvm_test` with a class that calls `randomize()`, and `` `uvm_info `` prints (this is the check that fails on the FPGA Starter edition) |
+| S2 | QuestaSim calls a C function through DPI-C (`import "DPI-C"`), passing ints and a `bit [31:0]` |
+| S3 | QuestaSim functional coverage (a covergroup) produces a report (`vcover report`) |
 | S4 | Verilator lints a toy design; simulates an `icg_cell` with a latch and dumps VCD in which `gclk` stops while `en = 0` |
 | S5 | the GCC toolchain assembles a Zbb instruction (`max`) and a `.insn r 0x0B, ...`; objcopy produces a `$readmemh` hex |
-| S6 | (D1a) Verilator compiles a minimal UVM 1.2 test |
-| S7 | xsim dumps a VCD for a chosen scope over a chosen time window |
+| S6 | Vivado xsim runs the same S1 test (fallback check, 15 minutes) |
+| S7 | QuestaSim dumps a VCD for a chosen scope over a chosen time window (`vcd file`, `vcd add`) |
 
 ## 14. Ownership and schedule outline
 
@@ -459,11 +466,13 @@ The detailed task-level plan (with "done" tests per task) is written next in `do
 
 | Risk | Mitigation |
 |---|---|
-| xsim lacks a feature (UVM/DPI/coverage) | Found in week 1 (S1–S3). Fallback: Verilator UVM (S6). Last resort: pyuvm. |
+| No full QuestaSim licence, or it lacks a feature (UVM/DPI/coverage) | Found in week 1 (S1–S3). Fallback: xsim (S6). Last resort: Verilator UVM or pyuvm. |
+| Questa run time too long for MNIST batches | Keep MNIST regression to a few batches on Questa; long runs on Verilator with a Questa cross-check (D1a). |
 | `rv_iss` is late, blocking `core_env` | Keep the ISS minimal and test it first. Interim: riscv-arch-test self-checking signatures as directed tests. |
 | Interface churn between tracks | Freeze §6 and §7.1 at the end of week 2. Changes after that need both students' sign-off and a spec update. |
 | DTCM WAR bugs in firmware | Software rule plus A-SOC-1, and a negative test that proves the assertion fires. |
-| Requant mismatch with golden | O2: copy the formula verbatim; unit-test the firmware `requant()` on the host against `golden_int8.py`. |
+| Requant mismatch with golden | Formula fixed in §9.3; unit-test the firmware `requant()` on the host against the notebook's `requant` with the retrained `M`, `S`. |
+| Notebook still trains 784-32-16-10 | Spec model is 784-64-32-10 (team decision 2026-10-14); notebook to be retrained and re-exported before Task 2 closes. |
 | Schedule pressure | Protect the order D0 correct → D1 equivalent → switching activity → MNIST. 8×8 and pipelining are dropped first. |
 
 ## 16. Relation to CoralNPU (contribution boundary)
@@ -490,3 +499,4 @@ No CoralNPU RTL or testbench code is reused. CoralNPU is cited as the architectu
 - [PH] D. A. Patterson, J. L. Hennessy, *Computer Organization and Design: The Hardware/Software Interface, RISC-V Edition*, 2nd ed., Morgan Kaufmann, 2021.
 - [ST] W. Stallings, *Computer Organization and Architecture: Designing for Performance*, 11th ed., Pearson, 2019.
 - Chapter-to-task reading guide: `docs/references/README.md`.
+- Altera, *Questa–Intel FPGA Edition Simulation User Guide*, "Simulator versions and licensing" (Starter edition: free, reduced performance). Altera Community, "Questa Starter Edition 25.1 – svverification license checkout fails" (staff answer: FPGA editions do not support `randomize`/`covergroup`; full QuestaSim needed).

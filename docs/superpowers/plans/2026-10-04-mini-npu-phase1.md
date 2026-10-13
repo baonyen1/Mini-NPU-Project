@@ -11,7 +11,7 @@
 
 **Architecture:** Two tracks share the interfaces frozen in Task 2. Track A grows `rtl/core` in place and checks each step with `tools/rv32i_check` (Python ISS, extended per extension). Track B builds `model/c/npu_ref.c` first, then `rtl/npu/mac_engine.sv` checked by a directed SV testbench that calls `npu_ref` over DPI-C. UVM starts in Phase 2.
 
-**Tech Stack:** Verilog/SystemVerilog (synthesizable subset for RTL), Vivado 2024.1 xsim, Verilator, Icarus Verilog (quick checks only), RISC-V GNU binutils/gcc (`-march=rv32im_zicsr_zifencei_zbb -mabi=ilp32`), C (gcc) for the golden models, Python 3.
+**Tech Stack:** Verilog/SystemVerilog (synthesizable subset for RTL), Siemens QuestaSim (full licence; UVM, DPI-C, coverage), Vivado 2024.1 xsim (fallback), Verilator, Icarus Verilog (quick checks only), RISC-V GNU binutils/gcc (`-march=rv32im_zicsr_zifencei_zbb -mabi=ilp32`), C (gcc) for the golden models, Python 3.
 
 **Spec:** `docs/superpowers/specs/2026-10-04-mini-npu-design.md` (approved 2026-10-04). Section numbers (§) below refer to it.
 
@@ -57,29 +57,29 @@
 ### Task 0: Week-1 tool gate (S1–S7) — both students, week 1
 
 **Files:**
-- Create: `sim/xsim/smoke/uvm_hello.sv`, `sim/xsim/smoke/dpi_add.c`, `sim/xsim/smoke/dpi_tb.sv`, `sim/xsim/smoke/cov_tb.sv`, `sim/xsim/smoke/vcd_scope.tcl`, `sim/verilator/smoke/icg_tb.sv`, `sim/verilator/smoke/count_toggles.py`, `sw/smoke/t.S`
+- Create: `sim/questa/smoke/uvm_hello.sv`, `sim/questa/smoke/dpi_add.c`, `sim/questa/smoke/dpi_tb.sv`, `sim/questa/smoke/cov_tb.sv`, `sim/questa/smoke/vcd_scope.do`, `sim/questa/smoke/run.do`, `sim/verilator/smoke/icg_tb.sv`, `sim/verilator/smoke/count_toggles.py`, `sw/smoke/t.S`
 - Create: `docs/smoke/results.md` (one row per check: command, observed output, ✅/❌, log path)
 
 **Interfaces:**
-- Produces: decision D1a (xsim vs Verilator as the primary UVM simulator) recorded in spec §3.1, and the exact tool commands later phases reuse.
+- Produces: confirmation that the team's QuestaSim licence runs UVM with `randomize`/`covergroup` (spec O3), the licence type in `docs/smoke/results.md`, and the exact tool commands later phases reuse.
 
-- [ ] **Step 1 (S1, xsim UVM):** a `hello_test extends uvm_test` whose `run_phase` does `` `uvm_info("HELLO","xsim UVM ok",UVM_LOW) ``.
-  Run: `xvlog -sv -L uvm uvm_hello.sv && xelab tb_top -L uvm -s hello && xsim hello -R -testplusarg UVM_TESTNAME=hello_test`.
-  Expected: a line containing `[HELLO] xsim UVM ok` and `UVM_ERROR :    0`. ⚠️ The exact flags are unverified; record whatever worked.
-- [ ] **Step 2 (S2, xsim DPI-C):** `int c_add(int a, int b)` in C, `import "DPI-C" function int c_add(input int a, input int b);` in SV, `$display("%0d", c_add(2,3))`.
-  Expected output: `5`. Record the compile path used (`xsc` or `xelab -sv_lib`).
+- [ ] **Step 1 (S1, QuestaSim UVM):** a `hello_test extends uvm_test` whose `run_phase` randomizes a small class (`rand bit [7:0] x; constraint c { x < 10; }`) and prints it with `` `uvm_info("HELLO", ...) ``.
+  Run (typical flow): `vlib work`, `vlog -sv uvm_hello.sv` (Questa ships a precompiled UVM; if `uvm_pkg` is not found, add `+incdir+$UVM_HOME/src $UVM_HOME/src/uvm_pkg.sv`), `vsim -c tb_top +UVM_TESTNAME=hello_test -do "run -all; quit"`.
+  Expected: `[HELLO]` line with a value < 10 and `UVM_ERROR :    0`. A "verification license" checkout error means the licence is the FPGA edition (spec O3). ⚠️ Exact flags vary by Questa version; record what worked.
+- [ ] **Step 2 (S2, QuestaSim DPI-C):** `int c_add(int a, int b)` in C, `import "DPI-C" function int c_add(input int a, input int b);` in SV, `$display("%0d", c_add(2,3))`.
+  Expected output: `5`. Record the compile path used (passing the `.c` file to `vlog`, or a shared library via `vsim -sv_lib`).
 - [ ] **Step 3 (S3, coverage report):** a covergroup with one coverpoint and 4 explicit bins. Sample values hitting exactly 2 of the bins.
-  Expected: the report shows 50.00 %. Record the report tool (candidate `xcrg`, unverified).
+  Run with `vsim -coverage`, then `coverage save cov.ucdb` and `vcover report cov.ucdb`. Expected: the covergroup shows 50.00 %.
 - [ ] **Step 4 (S4, Verilator ICG):** a toy `icg_cell` (latch + AND, §8) driven with `en` low for cycles 10–19.
   Run: `verilator --lint-only -Wall icg_tb.sv`, then `verilator --binary --trace icg_tb.sv`.
   Expected: lint clean, and `count_toggles.py` reports 0 toggles of `gclk` within cycles 11–19 and 2 per cycle elsewhere.
 - [ ] **Step 5 (S5, toolchain):** `t.S` contains `max a0, a1, a2` and `.insn r 0x0B, 0, 0, x0, a0, a1`.
   Run: `<prefix>gcc -march=rv32im_zicsr_zifencei_zbb -mabi=ilp32 -c t.S && <prefix>objdump -d t.o`.
   Expected: `max` disassembles, and the `.insn` word is `0x00b5000b`. Then `objcopy -O verilog` produces a hex file that `$readmemh` accepts.
-- [ ] **Step 6 (S6, Verilator UVM):** compile Step 1's file with Verilator against the UVM 1.2 sources (`--binary --timing`). Record pass/fail and the Verilator version. A failure is acceptable: the hybrid flow stays.
-- [ ] **Step 7 (S7, xsim VCD by scope):** a Tcl script that runs `open_vcd`, then `log_vcd` on one scope, then `run 1us; close_vcd`. Start from SeniorProject1 `tools/power/run_xsim_saif.tcl`.
+- [ ] **Step 6 (S6, xsim fallback):** run Step 1's file on Vivado xsim 2024.1 (`xvlog -sv -L uvm`, `xelab -L uvm`, `xsim -R -testplusarg UVM_TESTNAME=hello_test`). Record pass/fail; this is the fallback if the Questa licence is limited.
+- [ ] **Step 7 (S7, QuestaSim VCD by scope):** a `.do` script with `vcd file engine.vcd`, `vcd add -r /tb_top/dut/*`, `run 1us`, `vcd flush`.
   Expected: the VCD contains only signals of that scope.
-- [ ] **Step 8:** Fill `docs/smoke/results.md`. Set D1a in spec §3.1. If S1–S3 all pass, update proposal Tables 1, 3, 9, 11 and 12 (xsim + UVM; marimo instead of PyTorch).
+- [ ] **Step 8:** Fill `docs/smoke/results.md`. Record the licence type and close O3 in spec §3.2. If S1–S3 pass, update proposal Tables 1, 3, 9, 11 and 12 (QuestaSim + UVM instead of Verilator/cocotb; marimo instead of PyTorch).
 - [ ] **Step 9: Commit:** `git init` (first time only), then `git add -A && git commit -m "chore: week-1 tool gate results"`.
 
 ---
@@ -112,8 +112,8 @@
 **Interfaces:**
 - Produces: `npu_pkg` (imported by every SV file in `rtl/npu`, `rtl/top` and `tb/`); frozen spec §6 and §7.1.
 
-- [ ] **Step 1:** Add `golden_int8.py` and `model_params.json` to `model/py/`. Copy the requant expression and the clamp bounds into §9.3, exactly as written in the file.
-- [ ] **Step 2:** Write `docs/core_isa.md` and `rtl/top/npu_pkg.sv`. `npu_pkg.sv` must compile: run `xvlog -sv rtl/top/npu_pkg.sv` (clean) and `verilator --lint-only -Wall rtl/top/npu_pkg.sv` (clean).
+- [ ] **Step 1:** Retrain `notebooks/MiniNPU_MLP.py` with `layer_sizes=[784, 64, 32, 10]` (spec model) and export to `model/py/` (weights, biases, `requant.json`, test vectors, accuracy). Check the exported `M`, `S` against the §9.3 formula and record float/int8 accuracy in the spec.
+- [ ] **Step 2:** Write `docs/core_isa.md` and `rtl/top/npu_pkg.sv`. `npu_pkg.sv` must compile: run `vlog -sv rtl/top/npu_pkg.sv` on QuestaSim (clean) and `verilator --lint-only -Wall rtl/top/npu_pkg.sv` (clean).
 - [ ] **Step 3:** Both students read §6 and §7.1 and sign off in the spec header ("Frozen 2026-10-xx by A, B"). From this point, changes need both signatures.
 - [ ] **Step 4: Commit** `docs: freeze ISA and engine interface`.
 
@@ -327,7 +327,7 @@
 **Files:**
 - Create: `rtl/npu/mac_engine.sv`, `rtl/npu/cmd_fifo.sv`, `rtl/npu/pe_array.sv`, `rtl/npu/icg_cell.sv` (with `GATING_EN=0` it ties `en` to 1, §8)
 - Create: `tb/directed/mac_engine_tb.sv`, `tb/directed/dtcm_model.sv` (behavioural port-B memory backed by the same contents written to `npu_ref_mem_write`)
-- Create: `sim/xsim/run_mac_directed.tcl` (or `.bat`); `sim/verilator/Makefile` target `lint` (`verilator --lint-only -Wall rtl/npu/*.sv rtl/top/npu_pkg.sv`)
+- Create: `sim/questa/run_mac_directed.do` (and a `.bat`/`.sh` wrapper); `sim/verilator/Makefile` target `lint` (`verilator --lint-only -Wall rtl/npu/*.sv rtl/top/npu_pkg.sv`)
 - Create: `docs/mac_engine.md` (FSM diagram, exact latency per op for A-MAC-5)
 
 **Interfaces:**
@@ -348,7 +348,7 @@
   - `t_fifo_full`: 9 back-to-back pushes; `cmd_ready` drops at 8 entries and no command is lost
   - `t_read_while_busy`: `rd_ready` stays 0 until idle, then the data matches
   - `t_w1c`
-- [ ] **Step 2:** Run `sim/xsim/run_mac_directed` → FAIL (engine missing).
+- [ ] **Step 2:** Run `sim/questa/run_mac_directed` → FAIL (engine missing).
 - [ ] **Step 3:** Implement per §7.2–§7.3: FSM `IDLE/CHECK/LOAD/MAC`; free-clock and `clk_mac` domains; `en = !rst_n_sync || (fsm != IDLE) || !fifo_empty`.
 - [ ] **Step 4:** Run the directed suite → all PASS. Run `make -C sim/verilator lint` → clean. Record measured latencies in `docs/mac_engine.md`. Each must be ≤ K + 3.
 - [ ] **Step 5: Commit** `feat(npu): mac_engine D0 with directed DPI testbench`.
@@ -378,9 +378,9 @@
 
 ## Phase 1 exit checklist
 
-- [ ] Task 0: `docs/smoke/results.md` complete; D1a set; proposal updated if S1–S3 passed
+- [ ] Task 0: `docs/smoke/results.md` complete; licence type recorded, O3 closed; proposal updated if S1–S3 passed
 - [ ] Tasks 1–9: `python tools/rv32i_check/run_all.py` (with `MEMMAP="spec"`) runs all suites green, including Review Focus tests 1–3
 - [ ] Task 10: `make -C model/c test` green, including Review Focus 4–5
-- [ ] Task 11: directed engine suite green on xsim; Verilator lint clean
+- [ ] Task 11: directed engine suite green on QuestaSim; Verilator lint clean
 - [ ] Task 12: green, or explicitly moved to week 5 with the reason noted
 - [ ] Spec frozen (§6, §7.1) and O1/O2 recorded

@@ -14,7 +14,7 @@ tb/sva/          assertions
 model/c/         npu_ref.c, rv_iss.c (+ tests)
 model/py/        golden_int8.py, pack_weights.py, gen_matmul.py
 sw/              firmware: crt0, link.ld, npu.h, tests/, mnist/, synthetic/
-sim/xsim/        xsim scripts         sim/verilator/   Verilator scripts
+sim/questa/      QuestaSim scripts (UVM, coverage, VCD)   sim/verilator/   Verilator (lint, fast runs)
 power/           toggle counting + plots
 notebooks/       marimo notebooks
 docs/            spec, plans, notes, references/ (textbooks + reading guide)
