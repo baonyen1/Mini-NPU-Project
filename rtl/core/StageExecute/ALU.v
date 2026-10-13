@@ -23,6 +23,9 @@ localparam ALU_XOR = 4'b0011;
 localparam ALU_SLL = 4'b0100;
 localparam ALU_SRL = 4'b0101;
 localparam ALU_SUB = 4'b0110;
+localparam ALU_SLT  = 4'b0111; // set if A <  B, signed   (slt, slti)
+localparam ALU_SLTU = 4'b1000; // set if A <  B, unsigned (sltu, sltiu)
+localparam ALU_SRA  = 4'b1001; // arithmetic right shift  (sra, srai)
 
 always @(*) begin
     case (Control_in)
@@ -33,6 +36,9 @@ always @(*) begin
         ALU_SLL: ALU_result = A << B[4:0];
         ALU_SRL: ALU_result = A >> B[4:0];
         ALU_SUB: ALU_result = A - B;
+        ALU_SLT:  ALU_result = {31'b0, ($signed(A) < $signed(B))};
+        ALU_SLTU: ALU_result = {31'b0, (A < B)};
+        ALU_SRA:  ALU_result = $signed(A) >>> B[4:0];
         default: ALU_result = 32'b0;
     endcase
 end

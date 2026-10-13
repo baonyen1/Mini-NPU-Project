@@ -34,8 +34,9 @@ for k,v in T.items():
 print(f"\nDIRECTED HAZARD/CONTROL: {len(T)-len(fails)}/{len(T)} pass; FAIL={fails}")
 
 # ---- constrained-random over the SUPPORTED subset only ----
-SUP_R = ["add","sub","xor","or","and","sll","srl"]
-SUP_I = ["addi","xori","ori","andi"]
+SUP_R = ["add","sub","xor","or","and","sll","srl","sra","slt","sltu"]
+SUP_I = ["addi","xori","ori","andi","slti","sltiu"]
+SUP_SH = ["slli","srli","srai"]
 def rnd_prog(rng, n=60):
     regs = list(range(1,8))            # small reg pool -> dense dependencies
     L = [" li x31,0x200"]              # x31 = data base, never written below
@@ -43,7 +44,8 @@ def rnd_prog(rng, n=60):
     for i in range(n):
         r = rng.random(); d = rng.choice(regs); a = rng.choice(regs+[0]); b = rng.choice(regs+[0])
         if r < 0.35: L.append(f" {rng.choice(SUP_R)} x{d},x{a},x{b}")
-        elif r < 0.55: L.append(f" {rng.choice(SUP_I)} x{d},x{a},{rng.randint(-2048,2047)}")
+        elif r < 0.48: L.append(f" {rng.choice(SUP_I)} x{d},x{a},{rng.randint(-2048,2047)}")
+        elif r < 0.55: L.append(f" {rng.choice(SUP_SH)} x{d},x{a},{rng.randint(0,31)}")
         elif r < 0.62: L.append(f" lui x{d},{rng.randint(0,0xFFFFF)}")
         elif r < 0.75:
             op = rng.choice(["lw","lh","lhu","lb","lbu"]); al = {"lw":4,"lh":2,"lhu":2}.get(op,1)
@@ -52,7 +54,7 @@ def rnd_prog(rng, n=60):
             op = rng.choice(["sw","sh","sb"]); al = {"sw":4,"sh":2}.get(op,1)
             L.append(f" {op} x{b},{rng.randrange(0,64,al)}(x31)")
         else:
-            op = rng.choice(["beq","bne","blt","bge"]); lab += 1
+            op = rng.choice(["beq","bne","blt","bge","bltu","bgeu"]); lab += 1
             skip = rng.randint(0,3)
             L.append(f" {op} x{a},x{b},R{lab}")
             for _ in range(skip): L.append(f" addi x{rng.choice(regs)},x{rng.choice(regs)},{rng.randint(-50,50)}")
@@ -63,4 +65,8 @@ N = 300
 for s in range(N):
     rng = random.Random(s)
     if compare(rnd_prog(rng), f"rand_{s}", steps=400, cycles=800, quiet=True): rf.append(s)
-print(f"RANDOM (supported subset, {N} seeds x ~60 instr): {N-len(rf)}/{N} pass; failing seeds={rf[:10]}")
+print(f"RANDOM (full RV32I ALU/branch/load/store, {N} seeds x ~60 instr): {N-len(rf)}/{N} pass; failing seeds={rf[:10]}")
+import json
+res = {k: (k not in fails) for k in T}
+res.update({f"rand_{i}": (i not in rf) for i in range(N)})
+json.dump(res, open("build/results_hazard.json","w"), indent=1)

@@ -1,0 +1,3 @@
+# Tests that are allowed to fail right now. run_all.py fails on anything else,
+# and also fails when a test listed here starts passing (delete its line then).
+# 2026-10-09: empty - full RV32I base implemented (plan Task 3).

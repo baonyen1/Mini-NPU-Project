@@ -11,6 +11,11 @@ x1..x31 and all 256 data-memory words at the end of the run.
   `riscv32-unknown-elf-`. Or set `RV_PREFIX`, e.g. `set RV_PREFIX=riscv-none-elf-`.
 
 ## Run
+`run_all.py` exits 0 when every test passes except those listed in
+`expected_failures.txt`, and 1 on a regression or when a listed test starts
+passing (delete its line in the same commit). CI and `tools/finish_task.*` use
+this exit code.
+
 ```
 python run_all.py          # everything
 python tests_isa.py        # one test per RV32I instruction (40)
@@ -18,12 +23,14 @@ python tests_hazard.py     # 25 directed hazard/control tests + 300 random progr
 ```
 Artifacts go to `build/` (assembly, objects, binaries, `sim.vvp`).
 
-## Baseline (2026-10-04, core copied unchanged from Senior Project 1)
-- ISA: 30/40. Missing: `slt sltu sra slti sltiu slli srli srai bltu bgeu`.
-  `fence ecall ebreak` execute as NOP (no traps).
-- Hazard/control directed: 25/25. Random (supported subset only): 300/300.
-- Sanity: disabling EX/MEM forwarding drops these to 8/25 and 64/300, so the
-  harness does detect pipeline bugs.
+## Status (2026-10-09, after plan Task 3)
+- ISA: 44/44 (40 RV32I instructions + 4 signed/unsigned corner tests).
+  `fence ecall ebreak` execute as NOP (no traps yet, decision W2-1 open).
+- Hazard/control directed: 25/25. Random (full RV32I ALU/branch/load/store): 300/300.
+- `expected_failures.txt` is empty.
+- Sanity: injecting a logical `sra` or a signed `bltu` makes both the directed
+  and the random suites fail, so the harness detects these bugs.
+- History: the Senior Project 1 baseline was 30/40 (10 instructions missing).
 
 ## Notes
 - Memory model mirrors the current core: Harvard, 256-word IMEM, 256-word DMEM
@@ -31,7 +38,7 @@ Artifacts go to `build/` (assembly, objects, binaries, `sim.vvp`).
   to the spec (ITCM 16 KB / DTCM 64 KB).
 - The Senior Project 1 DFS coupling (`workload_monitor`, `cpu_en`) is removed; the
   harness builds `rtl/core` with no stub.
-- The random generator only uses instructions the core already supports. After
-  adding the missing instructions, add them to `SUP_R` / `SUP_I` / the branch list
-  in `tests_hazard.py`.
+- The random generator covers all RV32I ALU, shift, branch, load and store
+  instructions. Add new extensions (M, Zbb, …) to `SUP_R` / `SUP_I` / `SUP_SH` /
+  the branch list in `tests_hazard.py` as they are implemented.
 - This is a quick check, not the UVM environment in the spec (`tb/uvm/core_env`).

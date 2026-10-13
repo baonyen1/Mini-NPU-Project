@@ -40,5 +40,23 @@ results["jal"] = not compare(PRE + "  jal x10, T\n  addi x20,x20,1\nT: addi x21,
 results["jalr"] = not compare(PRE + "  auipc x5, 0\n  jalr x10, 16(x5)\n  addi x20,x20,1\n  addi x20,x20,2\n  addi x21,x21,1\n  addi x6, x5, 33\n  jalr x11, -1(x6)\n  addi x20,x20,4\n  addi x21,x21,2\n" + END, "jalr")
 for op, txt in [("fence","fence"),("ecall","ecall"),("ebreak","ebreak")]:
     results[op] = not compare(PRE + f"  {txt}\n  addi x10, x0, 7\n" + END, op)
+# Task 3 corner tests: signed vs unsigned behaviour on the same bit patterns
+results["slt_vs_sltu_sign"] = not compare(
+    "  li x1, 0x80000000\n  li x2, 1\n  slt x10, x1, x2\n  sltu x11, x1, x2\n"
+    "  slt x12, x2, x1\n  sltu x13, x2, x1\n" + END, "slt_vs_sltu_sign")
+results["sltiu_minus1"] = not compare(
+    "  li x1, 0x12345678\n  li x2, -1\n  sltiu x10, x1, -1\n  sltiu x11, x2, -1\n"
+    "  sltiu x12, x0, 1\n  slti x13, x2, 0\n" + END, "sltiu_minus1")
+results["srai_negative"] = not compare(
+    "  li x1, 0x80000F0F\n  srai x10, x1, 4\n  srai x11, x1, 31\n  srai x12, x1, 0\n"
+    "  srli x13, x1, 31\n  li x2, 36\n  sra x14, x1, x2\n" + END, "srai_negative")
+results["bltu_bgeu_sign"] = not compare(
+    "  li x1, 0x80000000\n  li x2, 1\n"
+    "  bltu x1, x2, A\n  addi x20, x20, 1\nA:\n"
+    "  bgeu x1, x2, B\n  addi x20, x20, 2\nB:\n"
+    "  blt  x1, x2, C\n  addi x20, x20, 4\nC:\n"
+    "  bgeu x0, x0, D\n  addi x20, x20, 8\nD:\n" + END, "bltu_bgeu_sign")
 print("\nSUMMARY:", sum(results.values()), "/", len(results), "pass")
 print("FAIL:", [k for k,v in results.items() if not v])
+import json
+json.dump(results, open("build/results_isa.json","w"), indent=1)

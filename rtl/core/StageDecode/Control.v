@@ -42,6 +42,9 @@ localparam ALU_XOR = 4'b0011;
 localparam ALU_SLL = 4'b0100;
 localparam ALU_SRL = 4'b0101;
 localparam ALU_SUB = 4'b0110;
+localparam ALU_SLT  = 4'b0111;
+localparam ALU_SLTU = 4'b1000;
+localparam ALU_SRA  = 4'b1001;
 
 always @(*) begin
     // Default NOP / unsupported instruction
@@ -59,7 +62,7 @@ always @(*) begin
     alu_operation      = ALU_ADD;
 
     case (Opcode)
-        7'b0110011: begin // R-type: ADD, SUB, AND, OR, XOR
+        7'b0110011: begin // R-type: ADD SUB SLL SLT SLTU XOR SRL SRA OR AND
             case (fun3)
                 3'b000: begin
                     if (fun7 == 7'b0000000) begin
@@ -83,10 +86,26 @@ always @(*) begin
                         alu_operation = ALU_SLL;
                     end
                 end
+                3'b010: begin
+                    if (fun7 == 7'b0000000) begin
+                        reg_write     = 1'b1;
+                        alu_operation = ALU_SLT;
+                    end
+                end
+                3'b011: begin
+                    if (fun7 == 7'b0000000) begin
+                        reg_write     = 1'b1;
+                        alu_operation = ALU_SLTU;
+                    end
+                end
                 3'b101: begin
                     if (fun7 == 7'b0000000) begin
                         reg_write     = 1'b1;
                         alu_operation = ALU_SRL;
+                    end
+                    else if (fun7 == 7'b0100000) begin
+                        reg_write     = 1'b1;
+                        alu_operation = ALU_SRA;
                     end
                 end
                 3'b110: begin
@@ -107,12 +126,41 @@ always @(*) begin
             endcase
         end
 
-        7'b0010011: begin // I-type: ADDI, ANDI, ORI, XORI
+        7'b0010011: begin // I-type: ADDI SLTI SLTIU XORI ORI ANDI SLLI SRLI SRAI
             case (fun3)
                 3'b000: begin
                     ALUSrc       = 1'b1;
                     reg_write    = 1'b1;
                     alu_operation = ALU_ADD;
+                end
+                3'b010: begin // SLTI
+                    ALUSrc       = 1'b1;
+                    reg_write    = 1'b1;
+                    alu_operation = ALU_SLT;
+                end
+                3'b011: begin // SLTIU: immediate is sign-extended, then compared unsigned
+                    ALUSrc       = 1'b1;
+                    reg_write    = 1'b1;
+                    alu_operation = ALU_SLTU;
+                end
+                3'b001: begin // SLLI: imm[11:5] (= fun7) must be 0000000
+                    if (fun7 == 7'b0000000) begin
+                        ALUSrc       = 1'b1;
+                        reg_write    = 1'b1;
+                        alu_operation = ALU_SLL;
+                    end
+                end
+                3'b101: begin // SRLI (fun7 = 0000000) / SRAI (fun7 = 0100000)
+                    if (fun7 == 7'b0000000) begin
+                        ALUSrc       = 1'b1;
+                        reg_write    = 1'b1;
+                        alu_operation = ALU_SRL;
+                    end
+                    else if (fun7 == 7'b0100000) begin
+                        ALUSrc       = 1'b1;
+                        reg_write    = 1'b1;
+                        alu_operation = ALU_SRA;
+                    end
                 end
                 3'b100: begin
                     ALUSrc       = 1'b1;
@@ -173,9 +221,8 @@ always @(*) begin
             end
         end
 
-        7'b1100011: begin // BEQ, BNE, BLT, BGE
-            if ((fun3 == 3'b000) || (fun3 == 3'b001) ||
-                (fun3 == 3'b100) || (fun3 == 3'b101)) begin
+        7'b1100011: begin // BEQ, BNE, BLT, BGE, BLTU, BGEU
+            if ((fun3 != 3'b010) && (fun3 != 3'b011)) begin
                 Branch             = 1'b1;
                 alu_operation      = ALU_SUB;
                 alu_branch_control = fun3;
