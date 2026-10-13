@@ -20,3 +20,21 @@ notebooks/       marimo notebooks
 docs/            spec, plans, notes, references/ (textbooks + reading guide)
 tools/rv32i_check/  quick RV32I self-check for rtl/core (python tools/rv32i_check/run_all.py)
 ```
+
+## Team workflow
+
+Both students push to `main`. Every push and pull request runs the regression on GitHub Actions
+(`.github/workflows/regression.yml`, results under the repo's **Actions** tab).
+
+When a task is done, finish it with one command. It runs the regression, commits, rebases on the
+teammate's latest commits, re-runs the regression and pushes. Nothing is pushed if a test fails.
+
+```powershell
+.\tools\finish_task.ps1 -Message "feat(core): complete RV32I base"     # Windows
+tools/finish_task.sh "feat(core): complete RV32I base"                 # Linux/macOS
+```
+
+- Use the commit message given for the task in `docs/superpowers/plans/`.
+- Docs-only changes: add `-SkipTests` (PowerShell) or `SKIP_TESTS=1` (bash).
+- A test that is allowed to fail for now goes in `tools/rv32i_check/expected_failures.txt`.
+  When you fix it, delete its line in the same commit, or the regression fails.

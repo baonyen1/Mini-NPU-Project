@@ -1,0 +1,29 @@
+# Runs the core regression on every push and pull request.
+# Same environment as the local check: Ubuntu 24.04, Icarus Verilog 12, GNU binutils 2.42.
+name: regression
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rv32i-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install simulator and RISC-V binutils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends iverilog binutils-riscv64-unknown-elf
+
+      - name: rtl/core RV32I regression
+        run: python3 tools/rv32i_check/run_all.py
+
+      - name: Keep build artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rv32i_check-build
+          path: tools/rv32i_check/build/
