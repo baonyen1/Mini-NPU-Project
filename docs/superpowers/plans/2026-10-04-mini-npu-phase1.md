@@ -22,11 +22,11 @@
 - Custom opcode `custom-0 = 0001011`. funct3: `000` LOAD_WEIGHT, `001` LOAD_INPUT, `010` COMPUTE (`funct7[0]` = clr), `011` READ_RESULT, `100–111` reserved → op ILLEGAL (§6.1).
 - Engine op encoding on `cmd_op[1:0]`: `0` LDW, `1` LDI, `2` MAC, `3` ILLEGAL (§7.1).
 - Arithmetic: signed int8 × signed int8 → int32, wrap mod 2³² (§3.1 D5).
-- `KMAX = 1024`, `FIFO_DEPTH = 8`, `PE_ROWS = PE_COLS = 4`, `DTCM_BASE = 0x0001_0000`, `DTCM_BYTES = 65536` (§4.2).
+- Engine geometry N×M×K = 4×4×4 (dot4 PEs, 64 MAC/cycle). `KMAX = 1024` int8 elements; K must be a multiple of 4; WBUF/IBUF = 256 entries × 128 bit. `FIFO_DEPTH = 8`, `DTCM_BASE = 0x0001_0000`, `DTCM_BYTES = 65536`, DTCM = 4 banks × 32 bit, port B 128 bit (§3.1 D10, §4.2).
 - Memory map: ITCM `0x0000_0000` 16 KB; DTCM `0x0001_0000` 64 KB; `SIM_CTRL` `0x0002_0000` (`0x1` PASS, `0x2` FAIL, `0x10` BATCH_DONE, `0x20` MEAS_START, `0x21` MEAS_STOP); `SIM_PUTC` `0x0002_0004` (§4.1).
 - CSRs: `mcycle/mcycleh` 0xB00/0xB80, `minstret/minstreth` 0xB02/0xB82, read-only aliases 0xC00/0xC02/0xC80/0xC82, `npu_status` 0x7C0, `npu_busy_cyc` 0x7C1 (§5, §6.4).
-- `npu_status` bits: 0 busy, 1 fifo_empty, 2 fifo_full, 8 err_k, 9 err_addr, 10 err_illegal (bits 8–10 sticky, W1C) (§6.4).
-- Lane order: lane *i* = bits `[8i+7:8i]`; READ_RESULT index `idx = 4*i + j` (§6.2).
+- `npu_status` bits: 0 busy, 1 fifo_empty, 2 fifo_full, 8 err_k, 9 err_addr, 10 err_illegal, 11 err_align (bits 8–11 sticky, W1C) (§6.4).
+- Lane order: lane *t* = bits `[8t+7:8t]`; a quad (16 B) holds word *i* = 4 consecutive elements of row/image *i*; LOAD addresses 16-byte aligned; READ_RESULT index `idx = 4*i + j` (§6.2).
 - Custom instructions are pushed to the FIFO in **MEM**; READ_RESULT stalls in MEM until `fifo_empty && fsm==IDLE` and writes back like a load (§6.3).
 - Power numbers are "switching-activity estimates", never "measured power" (§1).
 - Do not copy CoralNPU RTL or testbench code (§16).
@@ -234,7 +234,7 @@
 
 **Files:**
 - Create: `rtl/mem/itcm.sv` (16 KB, combinational read, backdoor `$readmemh` from plusarg `+ITCM=<file>`)
-- Create: `rtl/mem/dtcm_dp.sv` (64 KB true dual-port; port A R/W with byte enables, 1-cycle read; port B read-only, 1-cycle read; backdoor `+DTCM=<file>`)
+- Create: `rtl/mem/dtcm_dp.sv` (64 KB as 4 banks × 32 bit, bank = word address [1:0]; port A 32-bit R/W with byte enables, 1-cycle read; port B 128-bit read-only (one word from each bank), 1-cycle read; backdoor `+DTCM=<file>`)
 - Create: `rtl/top/core_tb_top.sv` (core + itcm + dtcm + SIM MMIO decode + engine stub from Task 9)
 - Modify: `rtl/core` LSU path (byte-lane formatting stays in the core; the old `Data_Memory.v`/`ProgramMemory.v` are removed); add the RVVI output ports under `` `ifdef RVVI_TRACE ``
 - Modify **[support]**: `tools/rv32i_check` → `MEMMAP="spec"`, hierarchy paths updated
@@ -246,11 +246,12 @@
   - `rvvi_valid`, `rvvi_order[63:0]`, `rvvi_pc[31:0]`, `rvvi_insn[31:0]`, `rvvi_rd[4:0]`, `rvvi_rd_wdata[31:0]`, `rvvi_mem_addr[31:0]`, `rvvi_mem_wdata[31:0]`, `rvvi_mem_wmask[3:0]`, `rvvi_trap`
 - Produces, `dtcm_dp` ports:
   - port A: `a_re`, `a_we[3:0]`, `a_addr[13:0]`, `a_wdata[31:0]`, `a_rdata[31:0]`
-  - port B (exactly §7.1): `b_req`, `b_addr[13:0]`, `b_rdata[31:0]`
+  - port B (exactly §7.1): `b_req`, `b_addr[11:0]` (quad index), `b_rdata[127:0]` (bank 0 in bits [31:0])
 
 - [ ] **Step 1: Failing tests:**
   - every earlier suite re-run with `MEMMAP="spec"`
   - `dtcm_last_word`: store and load at `0x0001_FFFC`
+  - `dtcm_port_b_quad`: after port-A stores to `0x0001_0010..0x0001_001C`, a port-B read of quad 1 returns those 4 words in bank order
   - `sim_ctrl_pass`: a write of `0x1` to `0x0002_0000` ends the simulation with "PASS"
   - `sim_putc`: `"OK\n"` appears in the log
   - `rvvi_order_monotonic`: the trace's `order` increments by 1 per retire, with no gaps after stalls or flushes (checked by a small Python script over a trace dump)
@@ -302,21 +303,22 @@
   `npu_ref_status()` returns the §6.4 layout with busy = 0, fifo_empty = 1, fifo_full = 0 (the model is untimed).
 
 - [ ] **Step 1: Write the failing tests** in `test_npu_ref.c`:
-  - `hand_4x4_k1`: `W=[1,-2,3,-4]`, `X=[5,6,-7,8]` → `acc[i][j] = W[i]*X[j]` (16 values asserted)
-  - `hand_k3_accumulate`: two COMPUTEs (clr=1 then clr=0) equal one COMPUTE over the concatenated K
+  - `hand_4x4_k4` (K=4, one quad): rows r0=[1,2,3,4], r1=[−1,−2,−3,−4], r2=[127,0,0,0], r3=[0,0,0,−128]; images x0=[1,1,1,1], x1=[1,0,0,0], x2=[−128,−128,−128,−128], x3=[2,−2,2,−2] → acc rows (j=0..3): r0 = [10, 1, −1280, −4]; r1 = [−10, −1, 1280, 4]; r2 = [127, 127, −16256, 254]; r3 = [−128, 0, 16384, 256]
+  - `hand_k8_accumulate`: COMPUTE K=4 (clr=1) on quad 0 then K=4 (clr=0) on quad 1 equals one COMPUTE K=8 over both quads
   - `extremes`: all lanes −128 × −128, K=1024 → each acc = 16,777,216
   - `wrap`: 129 × COMPUTE(K=1024, clr=0) of −128 × −128 → each acc = `(uint32_t)(129 * 16777216)`
   - `k0_noop`: K=0 for each op leaves state and status unchanged
   - `compute_k0_clr_keeps_acc` (Review Focus 5)
-  - `k_too_big`: K=1025 → `err_k` set; buffers and acc unchanged
-  - `addr_out_of_range`: `addr = 0x0000_FFFC` and `addr = 0x0001_FFFC` with K=2 → `err_addr`
+  - `k_too_big`: K=1028 → `err_k` set; buffers and acc unchanged
+  - `k_not_multiple_of_4`: K=6 for each op → `err_k`, command dropped
+  - `addr_out_of_range`: `addr = 0x0000_FFF0` with K=4, and `addr = 0x0001_FFF0` with K=8 → `err_addr`
   - `load_addr_wraps_32bit`: `addr=0xFFFF_FFF0, K=8` → `err_addr` (Review Focus 4)
-  - `last_word_ok`: `addr=0x0001_FFFC, K=1` → no error
+  - `last_quad_ok`: `addr=0x0001_FFF0, K=4` → no error
   - `illegal_op`: op 3 → `err_illegal`
-  - `w1c`: write `0x700` to 0x7C0 clears all three error bits; write `0x100` clears only `err_k`
-  - `addr_low_bits_ignored`: `addr=0x0001_0003` behaves like `0x0001_0000`
+  - `w1c`: write `0xF00` to 0x7C0 clears all four error bits; write `0x100` clears only `err_k`
+  - `addr_misaligned`: `addr=0x0001_0004` (and `0x0001_0001`) with K=4 → `err_align`, command dropped
 - [ ] **Step 2:** Run `make -C model/c test` → FAIL (not implemented).
-- [ ] **Step 3:** Implement. The range check is done in 64-bit arithmetic: `(uint64_t)a + 4ull*k > DTCM_BASE + DTCM_BYTES`.
+- [ ] **Step 3:** Implement. Check order in `npu_ref_cmd`: K==0 → no-op; K>KMAX or K%4 → `err_k`; for loads `a[3:0]≠0` → `err_align`, then range in 64-bit arithmetic `(uint64_t)a + 4ull*k > DTCM_BASE + DTCM_BYTES` → `err_addr`. Record this order in the spec if the team changes it.
 - [ ] **Step 4:** Run `make -C model/c test` → all asserts pass.
 - [ ] **Step 5: Commit** `feat(model): npu_ref golden model with unit tests`.
 
@@ -325,8 +327,8 @@
 ### Task 11: `mac_engine` RTL (D0) with a directed DPI testbench — Track B, weeks 3–4
 
 **Files:**
-- Create: `rtl/npu/mac_engine.sv`, `rtl/npu/cmd_fifo.sv`, `rtl/npu/pe_array.sv`, `rtl/npu/icg_cell.sv` (with `GATING_EN=0` it ties `en` to 1, §8)
-- Create: `tb/directed/mac_engine_tb.sv`, `tb/directed/dtcm_model.sv` (behavioural port-B memory backed by the same contents written to `npu_ref_mem_write`)
+- Create: `rtl/npu/mac_engine.sv`, `rtl/npu/cmd_fifo.sv`, `rtl/npu/pe_array.sv` (16 dot4 PEs), `rtl/npu/icg_cell.sv` (with `GATING_EN=0` it ties `en` to 1, §8)
+- Create: `tb/directed/mac_engine_tb.sv`, `tb/directed/dtcm_model.sv` (behavioural 128-bit port-B memory backed by the same contents written to `npu_ref_mem_write`)
 - Create: `sim/questa/run_mac_directed.do` (and a `.bat`/`.sh` wrapper); `sim/verilator/Makefile` target `lint` (`verilator --lint-only -Wall rtl/npu/*.sv rtl/top/npu_pkg.sv`)
 - Create: `docs/mac_engine.md` (FSM diagram, exact latency per op for A-MAC-5)
 
@@ -335,11 +337,11 @@
 - Produces: `module mac_engine #(parameter GATING_EN = 0)` with exactly the §7.1 ports. Phase 2's `mac_env` and `npu_top` bind to these names.
 
 - [ ] **Step 1: Write the failing directed tests** in `mac_engine_tb.sv`. Each test drives commands through the §7.1 push port, mirrors them into `npu_ref`, then compares all 16 READ_RESULT values and `npu_status` (`$fatal` on mismatch):
-  - `t_single_k1` (Task 10's `hand_4x4_k1`)
+  - `t_single_k4` (Task 10's `hand_4x4_k4`)
   - `t_k_kmax` (K=1024)
   - `t_k0`
-  - `t_k_too_big` (1025)
-  - `t_addr_oob`
+  - `t_k_too_big` (1028), `t_k_mod4` (K=6)
+  - `t_addr_oob`, `t_addr_misaligned`
   - `load_addr_wraps_32bit`
   - `compute_k0_clr_keeps_acc`
   - `t_illegal`
@@ -350,7 +352,7 @@
   - `t_w1c`
 - [ ] **Step 2:** Run `sim/questa/run_mac_directed` → FAIL (engine missing).
 - [ ] **Step 3:** Implement per §7.2–§7.3: FSM `IDLE/CHECK/LOAD/MAC`; free-clock and `clk_mac` domains; `en = !rst_n_sync || (fsm != IDLE) || !fifo_empty`.
-- [ ] **Step 4:** Run the directed suite → all PASS. Run `make -C sim/verilator lint` → clean. Record measured latencies in `docs/mac_engine.md`. Each must be ≤ K + 3.
+- [ ] **Step 4:** Run the directed suite → all PASS. Run `make -C sim/verilator lint` → clean. Record measured latencies in `docs/mac_engine.md`. Each must be ≤ K/4 + 3.
 - [ ] **Step 5: Commit** `feat(npu): mac_engine D0 with directed DPI testbench`.
 
 ---

@@ -3,7 +3,7 @@
 - **Project:** Senior Project 2 (Đồ án 2), HCMUTE, class 23161FIE, advisor Phạm Văn Khoa
 - **Team:** Nguyễn Thế Bảo (23144002), Nguyễn Hoàng Công Tấn (23161064)
 - **Repository:** https://github.com/baonyen1/Mini-NPU-Project
-- **Date:** 2026-10-04 (rev. 2026-10-14: QuestaSim, requant formula, model size confirmed) · **Status:** approved; §6/§7.1 freeze pending
+- **Date:** 2026-10-04 (rev. 2026-10-14: QuestaSim, requant formula, model size confirmed; rev. 2026-10-15: engine is N×M×K = 4×4×4 with dot4 PEs and a 128-bit DTCM port B) · **Status:** approved; §6/§7.1 freeze pending
 - **Source documents:** `Proposal_Senior_Project_2_MiniNPU_VI.docx`; CoralNPU repository `google-coral/coralnpu` at commit `382b5c1` (2026-10-02)
 
 This spec turns the proposal into a buildable design. It fixes interfaces and semantics so the two tracks can work in parallel. It says *what* each block must do and *how it will be proven*. It does not contain RTL, UVM code or firmware. The students write those.
@@ -15,8 +15,8 @@ This spec turns the proposal into a buildable design. It fixes interfaces and se
 Build a small NPU with these parts:
 
 1. The team's existing 5-stage RV32I core, extended to **RV32IM + Zicsr + Zifencei + Zbb**.
-2. Four custom instructions: **LOAD_WEIGHT, LOAD_INPUT, COMPUTE, READ_RESULT**. They dispatch through a command FIFO to a decoupled **4×4 int8 outer-product MAC engine**.
-3. A **64 KB dual-port DTCM** shared by the core and the engine.
+2. Four custom instructions: **LOAD_WEIGHT, LOAD_INPUT, COMPUTE, READ_RESULT**. They dispatch through a command FIFO to a decoupled **int8 outer-product MAC engine of N×M×K = 4×4×4** (16 PEs, each a 4-way dot product: 64 MAC/cycle), the same parameterisation CoralNPU uses at 8×8×4.
+3. A **64 KB DTCM** of 4 banks × 32 bit, shared by the core (port A, 32 bit) and the engine (port B, 128 bit, read-only).
 4. **Module-level clock gating** of the MAC engine. The design is built twice: **D0** without gating and **D1** with gating.
 
 All of it is verified with a self-built **SystemVerilog UVM** environment. It must run a **784-64-32-10 int8 MLP on MNIST** with outputs bit-exact against `golden_int8.py`.
@@ -67,6 +67,7 @@ All of it is verified with a self-built **SystemVerilog UVM** environment. It mu
 | D6 | The whole model lives in a 64 KB DTCM. No DMA. Closes open item 3. | Layout needs 56,816 B (§9.2). |
 | D7 | Data is loaded by backdoor `$readmemh` first. Closes open item 4. | Simplest working path. Frontdoor loading is thesis work. |
 | D8 | Golden ↔ scoreboard: DPI-C at block and system level; file comparison for MNIST. Closes open item 5. | Random tests need on-the-fly prediction. MNIST already has a Python golden. |
+| D10 | Engine geometry **N×M×K = 4×4×4**: each PE computes a dot4 per cycle; WBUF/IBUF entries and DTCM port B are 128 bit; K must be a multiple of 4. Team decision 2026-10-15 (option B). | Matches CoralNPU's N×M×K outer-product engine (8×8×4, VDOT = "4 × 8-bit multiplies reduced into 32-bit accumulators"). About 4× fewer engine cycles than 4×4×1, and the longer idle gaps make the D1 result visible on MNIST. |
 | D9 | Clock gating is gated by hardware-detected idle on the MAC engine only. | Coral gates the whole core on WFI/CSR (`CoreAxi.scala`). Finer granularity is our contribution. |
 
 ### 3.2 Open (the team decides; the default is used if no decision is recorded by the end of week 2)
@@ -91,13 +92,13 @@ All of it is verified with a self-built **SystemVerilog UVM** environment. It mu
                  │                │ mac_engine                       │      │
                  │                │  free clk : cmd FIFO(8), FSM,    │      │
                  │                │             CSRs, port-B ctrl    │      │
-                 │                │  clk_mac  : WBUF, IBUF (KMAX×32),│      │
-                 │                │             PE 4×4, acc 4×4×32   │      │
+                 │                │  clk_mac  : WBUF, IBUF 256×128,  │      │
+                 │                │             PE 4×4 dot4, acc 4×4 │      │
                  │                │  icg_cell(en) → clk_mac          │      │
                  │                └───────┬──────────────────────────┘      │
-                 │   LSU (port A, R/W)    │ port B (read-only)              │
+                 │   LSU (port A, 32b R/W) │ port B (128b, read-only)       │
                  │          ▼             ▼                                 │
-                 │       DTCM 64 KB, true dual-port, 0x0001_0000           │
+                 │     DTCM 64 KB, 4 banks × 32b, 0x0001_0000             │
                  │   SIM MMIO 0x0002_0000 (SIM_CTRL, SIM_PUTC) — tb only   │
                  └──────────────────────────────────────────────────────────┘
 ```
@@ -107,7 +108,7 @@ All of it is verified with a self-built **SystemVerilog UVM** environment. It mu
 | Base | Size | Region | Access |
 |---|---|---|---|
 | `0x0000_0000` | 16 KB | ITCM (firmware) | core IF read; backdoor load |
-| `0x0001_0000` | 64 KB | DTCM | port A: core LSU (R/W, byte enables); port B: engine (read-only) |
+| `0x0001_0000` | 64 KB | DTCM, 4 banks × 32 bit (bank = word address [1:0]) | port A: core LSU, 32 bit R/W with byte enables; port B: engine, 128 bit (one word from each bank), read-only |
 | `0x0002_0000` | 4 B | `SIM_CTRL` (write-only) | `0x1` PASS, `0x2` FAIL, `0x10` BATCH_DONE, `0x20` MEAS_START, `0x21` MEAS_STOP |
 | `0x0002_0004` | 4 B | `SIM_PUTC` (write-only) | low byte printed to the simulation log |
 
@@ -117,8 +118,9 @@ Any other address is an access fault. Behaviour is decided by the core's existin
 
 | Name | Default | Notes |
 |---|---|---|
-| `PE_ROWS`, `PE_COLS` | 4, 4 | 8×8 only if time allows after SC1–SC3 |
-| `KMAX` | 1024 | depth of WBUF and IBUF (words) |
+| `PE_ROWS` (N), `PE_COLS` (M) | 4, 4 | 8×8 only if time allows after SC1–SC3 |
+| `K_DOT` (K) | 4 | int8 lanes per PE per cycle (dot4); fixed, not a verified parameter |
+| `KMAX` | 1024 | largest K in int8 elements; WBUF/IBUF depth = KMAX/4 = 256 entries × 128 bit |
 | `FIFO_DEPTH` | 8 | same depth as Coral's command queue |
 | `GATING_EN` | 0 (D0) / 1 (D1) | the only RTL difference between D0 and D1 |
 | `DTCM_BASE`, `DTCM_BYTES` | `0x0001_0000`, 65536 | |
@@ -160,19 +162,21 @@ All four instructions use opcode **custom-0 = `0001011`** in R-type format.
 
 ### 6.2 Data format
 
-- A DTCM word is 4 int8 lanes. Lane *i* is bits `[8i+7:8i]` (lane 0 = LSB, little-endian).
-- `WBUF[k]` lane *i* = W[r₀+i][k], the weights of 4 output rows at input index k.
-- `IBUF[k]` lane *j* = x_j[k], input index k of image j (4 images per batch).
-- After COMPUTE, `acc[i][j]` holds the dot product of output row r₀+i with image j.
-- READ_RESULT index `idx = 4*i + j`.
+- A DTCM word is 4 int8 lanes. Lane *t* is bits `[8t+7:8t]` (lane 0 = LSB, little-endian).
+- A **quad** is 4 consecutive words (16 bytes, 16-byte aligned) = one 128-bit WBUF/IBUF entry = one port-B read.
+- K counts int8 elements along the reduction axis; a command with K elements uses S = K/4 quads (steps).
+- `WBUF[s]` word *i* (bits `[32i+31:32i]`) = W[r₀+i][4s .. 4s+3]: four consecutive weights of output row r₀+i.
+- `IBUF[s]` word *j* = x_j[4s .. 4s+3]: four consecutive inputs of image j (4 images per batch).
+- In DTCM, quad *s* of a LOAD at address *a* is at `a + 16s`, and word *i* (or *j*) of that quad at `a + 16s + 4i`.
+- After COMPUTE, `acc[i][j]` holds the dot product of output row r₀+i with image j. READ_RESULT index `idx = 4*i + j`.
 
 ### 6.3 Semantics
 
 | Instruction | Effect |
 |---|---|
-| `LOAD_WEIGHT a, K` | for k in 0..K-1: `WBUF[k] ← DTCM[a + 4k]` |
-| `LOAD_INPUT a, K` | for k in 0..K-1: `IBUF[k] ← DTCM[a + 4k]` |
-| `COMPUTE K, clr` | `acc[i][j] ← (clr ? 0 : acc[i][j]) + Σ_{k<K} sext(WBUF[k].lane_i) · sext(IBUF[k].lane_j)`, arithmetic mod 2³² |
+| `LOAD_WEIGHT a, K` | for s in 0..K/4-1: `WBUF[s] ← DTCM[a + 16s .. a + 16s + 15]` (one 128-bit port-B read per s) |
+| `LOAD_INPUT a, K` | for s in 0..K/4-1: `IBUF[s] ← DTCM[a + 16s .. a + 16s + 15]` |
+| `COMPUTE K, clr` | `acc[i][j] ← (clr ? 0 : acc[i][j]) + Σ_{s<K/4} Σ_{t<4} sext(WBUF[s].word_i.lane_t) · sext(IBUF[s].word_j.lane_t)`, arithmetic mod 2³² |
 | `READ_RESULT rd, idx` | `rd ← acc[idx/4][idx%4]` |
 
 **Ordering rules:**
@@ -181,15 +185,16 @@ All four instructions use opcode **custom-0 = `0001011`** in R-type format.
 3. A full FIFO stalls the pipeline at MEM.
 4. **READ_RESULT** stalls in MEM until `fifo_empty && fsm == IDLE`. It then returns data in WB like a load and reuses the load-use hazard logic. It is the only barrier.
 5. **Software rule (WAR):** firmware must not store to a DTCM word that a LOAD still queued or running will read. Satisfy this by issuing READ_RESULT, which drains the engine, before overwriting buffers. The rule is checked by assertion A-SOC-1 (§10.6).
-6. Bits `[1:0]` of the address are ignored (the address is word-aligned by truncation).
+6. LOAD addresses must be 16-byte aligned (quad-aligned); see the error table.
 
 **Error handling.** A command that violates a rule is dropped and sets a sticky bit in `npu_status`. Execution continues.
 
 | Condition | Effect |
 |---|---|
 | K = 0 (any op) | no operation, no error |
-| K > KMAX | dropped, `err_k` ← 1 |
-| LOAD with `a < DTCM_BASE` or `a + 4K > DTCM_BASE + DTCM_BYTES` | dropped, `err_addr` ← 1 |
+| K > KMAX, or K not a multiple of 4 | dropped, `err_k` ← 1 |
+| LOAD with `a[3:0] ≠ 0` | dropped, `err_align` ← 1 |
+| LOAD with `a < DTCM_BASE` or `a + 4K > DTCM_BASE + DTCM_BYTES` (computed without 32-bit wrap) | dropped, `err_addr` ← 1 |
 | funct3 ∈ {100..111} | the core pushes op `ILLEGAL`; the engine sets `err_illegal` ← 1 |
 | READ_RESULT with `rs1[31:4] ≠ 0` | upper bits ignored, no error |
 
@@ -207,6 +212,7 @@ The CSRs are implemented in the engine and accessed by the core's CSR unit over 
 | 8 | `err_k` | W1C, sticky | |
 | 9 | `err_addr` | W1C, sticky | |
 | 10 | `err_illegal` | W1C, sticky | |
+| 11 | `err_align` | W1C, sticky | |
 | others | — | RO 0 | |
 
 `npu_busy_cyc` (0x7C1): a 32-bit counter of cycles with `fsm != IDLE`. It runs on the free clock. A CSR write sets its value.
@@ -227,21 +233,21 @@ output [31:0] rd_data;                        // valid when rd_req && rd_ready
 // CSR port
 input  csr_we; input [11:0] csr_addr; input [31:0] csr_wdata; output [31:0] csr_rdata;
 // DTCM port B (read-only, 1-cycle latency)
-output b_req; output [13:0] b_addr;           // word index within DTCM
-input  [31:0] b_rdata;                        // valid the cycle after b_req
+output b_req; output [11:0] b_addr;           // quad index within DTCM (4096 quads)
+input  [127:0] b_rdata;                       // 4 words (bank 0 = bits [31:0]), valid the cycle after b_req
 // clocks
 input clk, rst_n;                             // free clock
 ```
 
 ### 7.2 Behaviour
 
-- **FSM states:** `IDLE`, `CHECK`, `LOAD`, `MAC`. In `CHECK` the head command is popped and validated (§6.3 error table). A valid LOAD goes to `LOAD`: it streams K reads on port B and writes WBUF or IBUF. A valid MAC goes to `MAC`: it reads `WBUF[k]` and `IBUF[k]` and updates all 16 accumulators each cycle.
-- **Latency:** each command must finish within K + 3 cycles of being popped. The exact count is documented by Track B in `docs/mac_engine.md`. The UVM scoreboard checks values, not latency. Latency is only constrained by the timeout assertion A-MAC-5.
-- **PE:** one cycle per MAC step (no pipelining in Senior Project 2): `acc_ij <= acc_ij + sext8(a_i) * sext8(b_j)`. When clr is set, the first step loads the product instead of adding it.
+- **FSM states:** `IDLE`, `CHECK`, `LOAD`, `MAC`. In `CHECK` the head command is popped and validated (§6.3 error table). A valid LOAD goes to `LOAD`: it streams K/4 quad reads on port B and writes WBUF or IBUF. A valid MAC goes to `MAC`: it reads `WBUF[s]` and `IBUF[s]` and updates all 16 accumulators each cycle (64 MACs).
+- **Latency:** each command must finish within K/4 + 3 cycles of being popped. The exact count is documented by Track B in `docs/mac_engine.md`. The UVM scoreboard checks values, not latency. Latency is only constrained by the timeout assertion A-MAC-5.
+- **PE (dot4):** one cycle per step (no pipelining in Senior Project 2): `acc_ij <= acc_ij + Σ_{t<4} sext8(a_i[t]) * sext8(b_j[t])`, i.e. 4 multipliers and a 3-adder tree per PE, 64 multipliers in total. When clr is set, the first step loads the dot product instead of adding it.
 - **Buffers:** synchronous single-port RAM arrays, written in `LOAD` and read in `MAC`. They are never accessed at the same time because only one command runs at a time.
   - Buffers are **not reset** and keep their contents between commands.
-  - COMPUTE reads entries 0..K-1 whatever the last LOAD's K was.
-  - Reading an entry never written since reset is a test error, not a DUT error. Random sequences are constrained so that COMPUTE's K never exceeds the smallest number of entries written since reset in WBUF or IBUF. The predictor raises `UVM_ERROR` if a sequence breaks this rule.
+  - COMPUTE reads entries 0..K/4-1 whatever the last LOAD's K was.
+  - Reading an entry never written since reset is a test error, not a DUT error. Random sequences are constrained so that COMPUTE's K/4 never exceeds the smallest number of entries written since reset in WBUF or IBUF. The predictor raises `UVM_ERROR` if a sequence breaks this rule.
 
 ### 7.3 Clock domains
 
@@ -291,19 +297,20 @@ READ_RESULT reads the accumulators combinationally. They hold their value while 
 | MAILBOX | TB→FW "next batch ready" flag | 1 | 4 | `0x1_DDF0–0x1_DDF3` |
 | free / stack | | | 8,716 | `0x1_DDF4–0x1_FFFF` |
 
-The data region totals 56,816 B. Model is **784-64-32-10** (decision 2026-10-14); the notebook currently trains 784-32-16-10 and must be retrained before `pack_weights.py` generates this image. `pack_weights.py` generates this image and its linker symbols. The exact symbol addresses are taken from the linker map, not hard-coded.
+The data region totals 56,816 B. Every region base is 16-byte aligned, as quad LOADs require. Weight tiles are stored quad by quad: word `16s + 4i` (byte offset within the tile) holds W[4t+i][4s..4s+3]; X and the activation buffers hold, at byte offset `16s + 4j`, the four values 4s..4s+3 of image j. Model is **784-64-32-10** (decision 2026-10-14); the notebook currently trains 784-32-16-10 and must be retrained before `pack_weights.py` generates this image. `pack_weights.py` generates this image and its linker symbols. The exact symbol addresses are taken from the linker map, not hard-coded.
 
 ### 9.3 Per-layer loop (reference algorithm)
 
 ```
 npu_load_i(IN, K)                              // once per layer; IBUF reused across tiles
 for t in 0 .. N_out/4 - 1:
-    npu_load_w(W + t*4K, K)
+    npu_load_w(W + t*4K, K)                    // a tile is 4 rows × K bytes = 4K bytes
     npu_compute(K, clr=1)
     for i in 0..3, j in 0..3:
         v = npu_read(4*i + j) + B[4t + i]
-        out[i][j] = requant(v)                 // per O1/O2; final layer keeps int32
-    for i in 0..3: OUT[4t + i] = pack(out[i][0..3])   // one word = 4 images
+        out[i][j] = requant(v)                 // final layer keeps int32
+    for j in 0..3: OUT[16t + 4j] = pack(out[0][j], out[1][j], out[2][j], out[3][j])
+                                               // neurons 4t..4t+3 of image j = next layer's quad t, word j
 ```
 
 `requant()` must be **bit-identical** to the golden model. Formula (from `notebooks/MiniNPU_MLP.py`, functions `requant` and `find_ms`):
@@ -357,7 +364,7 @@ The reference keeps its own DTCM image. Every sequence that writes the responder
 
 | Env | Directed | Random |
 |---|---|---|
-| mac | single LDW/LDI/MAC with K=1; K=KMAX; K=0; K=KMAX+1; out-of-range address; illegal op; clr vs accumulate; forced wrap (repeated accumulate with ±128·±128 operands); FIFO fill to full with back-to-back pushes; READ while busy; W1C clear of error bits | `mac_rand_seq`: random op mix, K ∈ weighted bins, random operands with corner-value bias, random inter-command gaps (0–20 cycles), ≥ 200 seeds |
+| mac | single LDW/LDI/MAC with K=4; K=KMAX; K=0; K=KMAX+4; K=6 (not a multiple of 4); misaligned address (`a[3:0]=4`); out-of-range address; illegal op; clr vs accumulate; forced wrap (repeated accumulate with ±128·±128 operands); FIFO fill to full with back-to-back pushes; READ while busy; W1C clear of error bits | `mac_rand_seq`: random op mix, K ∈ weighted bins, random operands with corner-value bias, random inter-command gaps (0–20 cycles), ≥ 200 seeds |
 | core | per instruction: every M/Zbb/Zicsr/Zifencei instruction including div corners; hazard distance 1/2/3 for each forwarding path; load-use; custom-instruction decode and push timing (with stub); FIFO-full stall (stub with `ready = 0`) | `core_rand_seq`: random ALU/M/Zbb streams with controlled dependency distance, then streams with branches; ≥ 200 seeds |
 | soc | one firmware test per custom instruction; WAR-violation negative test (expects A-SOC-1 to fire); 4×4×K matmul vs `npu_ref`; full layer-sized matmul (784×64); MNIST N batches | `soc_rand_matmul`: Python generates random M×K×N int8 matrices plus firmware data from a seed |
 
@@ -374,13 +381,13 @@ Every soc test and every MNIST run is executed in both configurations. Any diffe
 
 | Group | Bins |
 |---|---|
-| `cg_cmd` | op {LDW, LDI, MAC, ILLEGAL} × K {0, 1, 2–15, 16–KMAX-1, KMAX, >KMAX}; MAC × clr {0, 1} × acc-nonzero-before {0, 1} |
-| `cg_operand` | per lane, value ∈ {-128, -1, 0, 1, 127, other} for WBUF and IBUF |
+| `cg_cmd` | op {LDW, LDI, MAC, ILLEGAL} × K {0, 4, 8–60, 64–KMAX-4, KMAX, >KMAX} × K mod 4 {0, 1, 2, 3}; MAC × clr {0, 1} × acc-nonzero-before {0, 1} |
+| `cg_operand` | per lane (16 lanes per quad), value ∈ {-128, -1, 0, 1, 127, other} for WBUF and IBUF |
 | `cg_fifo` | occupancy at push {0, 1, 2–6, 7, 8=full}; push-while-full (stall) observed |
 | `cg_state` | transitions IDLE→CHECK, CHECK→LOAD, CHECK→MAC, CHECK→IDLE (dropped), LOAD→IDLE, MAC→IDLE; READ arriving while busy |
 | `cg_acc` | accumulate result wraps positive→negative and negative→positive |
 | `cg_err` | each error bit set; set while already set; W1C clear |
-| `cg_addr` | LOAD touching the first DTCM word, the last DTCM word, one word past the end |
+| `cg_addr` | LOAD touching the first DTCM quad, the last DTCM quad, one quad past the end; `a[3:0]` ∈ {0, 4, 8, 12, other} |
 | `cg_gate` (D1 only) | en rise, en fall, en low for 1 cycle, en low for ≥ 100 cycles |
 | core `Cvgrp_*` | per extension: every opcode; rd = x0 and rd ≠ x0; rs1 = rs2; forwarding source {EX/MEM, MEM/WB, none}; DIV {÷0, overflow, normal}; CSR {rw, rs, rc, imm variants} × {0xB00, 0xB02, 0x7C0, 0x7C1} |
 
@@ -392,7 +399,7 @@ Every soc test and every MNIST run is executed in both configurations. Any diffe
 | A-MAC-2 | `rd_ready |-> (fifo_empty && fsm==IDLE)` |
 | A-MAC-3 | `b_req` only in `LOAD`; `b_addr` stays within DTCM |
 | A-MAC-4 | buffers are never written outside `LOAD` |
-| A-MAC-5 | every popped command returns to IDLE within K + 3 cycles |
+| A-MAC-5 | every popped command returns to IDLE within K/4 + 3 cycles |
 | A-GATE-1 | `(fsm != IDLE || !fifo_empty) |-> en` (never gate pending work) |
 | A-GATE-2 | when `GATING_EN = 1` and `en_l = 0`, `clk_mac` stays low |
 | A-SOC-1 | a port-A store to word *w* while a queued or running LOAD covers *w* is a WAR violation (error) |
@@ -483,9 +490,9 @@ The detailed task-level plan (with "done" tests per task) is written next in `do
 | ISA | RV32IMF_Zba_Zbb_Zicsr_Zifencei + RVV 1.0 + Zvt (experimental) | RV32IM_Zicsr_Zifencei_Zbb + 4 custom-0 instructions |
 | Command path | scalar dispatch → 8-entry command queue → decoupled backend | MEM-stage push → 8-entry FIFO → decoupled engine |
 | Operand staging | `vle8` from DTCM into a 32×128-bit vector register file | engine LOAD from DTCM into WBUF/IBUF |
-| Matrix compute | PE array, 16 tiles `mt0..mt15`, INT8/FP32/BF16 | 4×4 int8 PE, 1 tile |
+| Matrix compute | outer-product engine N×M×K (docs: typical 8×8×4 = 256 MAC/cycle, VDOT dot4 per PE); repo VME: 16 tiles `mt0..mt15`, INT8/FP32/BF16 | N×M×K = 4×4×4 = 64 MAC/cycle, int8 dot4 PEs, 1 tile |
 | Result path | `vtmv.v.t` then `vse32` | READ_RESULT to a scalar register |
-| Memory | banked DTCM + crossbar, 32 KB default | true dual-port DTCM, 64 KB |
+| Memory | banked DTCM (4 × 32 b) + crossbar, 128-bit DBus, 32 KB default | DTCM 4 banks × 32 b, 64 KB; port A 32 b (core), port B 128 b (engine) |
 | Clock gating | whole-core gate on WFI/CSR (`CoreAxi.scala`) | MAC-engine gate on hardware-detected idle |
 | Verification | UVM on VCS/Verilator, RVVI agent, Spike cosim | self-built UVM, RVVI-style trace, own C ISS and C NPU model |
 
