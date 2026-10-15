@@ -56,14 +56,14 @@
 
 ---
 
-## Phase roadmap (later plans are written at the start of each phase)
+## Phase roadmap (Phases 2–4 planned in detail on 2026-10-15)
 
-| Phase | Weeks | Plan file (to be written) | Exit criterion |
+| Phase | Weeks | Plan file | Exit criterion |
 |---|---|---|---|
 | **1 (this plan)** | 1–4 | `2026-10-04-mini-npu-phase1.md` | Tasks 0–11 done |
-| 2 | 5–9 | `…-phase2-uvm-integration.md` | `npu_top` integrated; mac/core/soc UVM envs; coverage closed (SC1, SC2) |
-| 3 | 10–12 | `…-phase3-gating-power.md` | D1 cycle-identical to D0 (SC3); E2 switching data (SC4) |
-| 4 | 13–16 | `…-phase4-mnist-report.md` | MNIST bit-exact (SC5); E4; reproducibility package (SC6); report |
+| 2 | 5–9 | `2026-10-15-mini-npu-phase2-uvm-integration.md` | `npu_top` integrated; mac/core/soc UVM envs; coverage closed (SC1, SC2) |
+| 3 | 10–12 | `2026-10-15-mini-npu-phase3-gating-power.md` | D1 cycle-identical to D0 (SC3); E2 switching data (SC4) |
+| 4 | 13–16 | `2026-10-15-mini-npu-phase4-mnist-report.md` | MNIST bit-exact (SC5); E4; reproducibility package (SC6); report |
 
 **Schedule risk (flagged now):** Track A in weeks 3–4 carries Tasks 5, 6, 7, 8, 9 and 12, plus Tấn's handover of a core he did not write. That is the densest stretch of the project. `dtcm_dp` moves to Track B to lighten it. If Task 12 (`rv_iss.c`) slips, it may move into week 5, because Phase 2's `core_env` needs it only from week 5. Track B starts late: Task 10 was due in week 2, so Bảo starts it immediately and Task 11 has no slack. Nothing else may slip past week 4 without re-planning.
 
