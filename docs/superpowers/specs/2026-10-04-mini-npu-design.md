@@ -1,7 +1,7 @@
 # Mini-NPU Design Spec — A CoralNPU-Inspired RISC-V NPU
 
 - **Project:** Senior Project 2 (Đồ án 2), HCMUTE, class 23161FIE, advisor Phạm Văn Khoa
-- **Team:** Nguyễn Thế Bảo (23144002), Nguyễn Hoàng Công Tấn (23161064)
+- **Team:** Nguyễn Hoàng Công Tấn (23161064) — Track A, scalar core; Nguyễn Thế Bảo (23144002) — Track B, Matrix/MAC engine (assignment 2026-10-15)
 - **Repository:** https://github.com/baonyen1/Mini-NPU-Project
 - **Date:** 2026-10-04 (rev. 2026-10-14: QuestaSim, requant formula, model size confirmed; rev. 2026-10-15: engine is N×M×K = 4×4×4 with dot4 PEs and a 128-bit DTCM port B) · **Status:** approved; §6/§7.1 freeze pending
 - **Source documents:** `Proposal_Senior_Project_2_MiniNPU_VI.docx`; CoralNPU repository `google-coral/coralnpu` at commit `382b5c1` (2026-10-02)
@@ -61,7 +61,7 @@ All of it is verified with a self-built **SystemVerilog UVM** environment. It mu
 | D1 | UVM 1.2 (IEEE 1800.2) in SystemVerilog. **Primary simulator: Siemens QuestaSim** (team decision 2026-10-14). Fallback: Vivado xsim 2024.1. Verilator is used for lint and fast full-system runs. | Industry-standard UVM simulator with built-in UVM, DPI-C and coverage. **Requires a full QuestaSim licence:** the free Questa–Intel/Altera FPGA (Starter) editions do not support `randomize`/`covergroup` (Altera forum, see §17), so a UVM bench with constrained random and coverage will not run there. Confirmed or refuted by S1–S3. |
 | D1a | Switching-activity VCDs for D0/D1 come from **one** simulator for both configurations: QuestaSim by default; Verilator only if Questa run time for MNIST is too long (decide after the first MNIST run). | D0/D1 fairness (§11) needs identical tooling. |
 | D2 | Extend the existing 5-stage pipelined RV32I core. | Already built by the team. |
-| D3 | Work is split by subsystem. **Track A**: core and `core_env`. **Track B**: MAC engine and `mac_env`. Both tracks share the SoC integration and `soc_env`. | Parallel work with a clean interface. |
+| D3 | Work is split by subsystem. **Track A** (Tấn): core and `core_env`. **Track B** (Bảo): MAC engine, `dtcm_dp` and `mac_env`. Both tracks share the SoC integration and `soc_env`. | Parallel work with a clean interface. |
 | D4 | "Coral, scaled down": the engine fetches operands from DTCM by itself into operand buffers, then accumulates into one 4×4 tile. | Mirrors Coral: `vle8` → vector regs → `vtmms` → tile → `vtmv`. |
 | D5 | Signed int8 × signed int8 → int32 accumulate. **Overflow wraps** (two's complement). | Matches `int32_t` in the C golden. ReLU outputs lie in [0,127], so signed covers them. |
 | D6 | The whole model lives in a 64 KB DTCM. No DMA. Closes open item 3. | Layout needs 56,816 B (§9.2). |
@@ -454,11 +454,11 @@ Each item is answered "works / does not work, with evidence (log)". The proposal
 
 ## 14. Ownership and schedule outline
 
-| Weeks | Track A (core) | Track B (MAC engine) | Joint |
+| Weeks | Track A (core) — Tấn | Track B (MAC engine) — Bảo | Joint |
 |---|---|---|---|
 | 1 | S1–S7 (split) | S1–S7 (split) | gate review |
 | 2 | ISA and encoding doc, CSR map, trap/fault policy | engine interface freeze (§7.1), `npu_ref` + unit tests | sign off §6 and §7.1 |
-| 3–4 | M, Zicsr, Zifencei, Zbb, custom decode/push; `rv_iss` + unit tests | `mac_engine` RTL (D0); `mac_env` skeleton | |
+| 3–4 | M, Zicsr, Zifencei, Zbb, custom decode/push; `rv_iss` + unit tests | `mac_engine` RTL (D0); `dtcm_dp`; `mac_env` skeleton | |
 | 5–6 | `core_env` + directed tests | `mac_env` directed tests | `npu_top` integration, first soc test |
 | 7–9 | core random + coverage | mac random + coverage | soc tests, coverage closure (SC2) |
 | 10–11 | — | `icg_cell`, D1 | equivalence harness, D1 regression (SC3) |

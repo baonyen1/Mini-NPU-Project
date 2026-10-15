@@ -17,6 +17,21 @@
 
 **Working tree:** `SeniorProject2/` (layout in `README.md`). Paths are relative to it.
 
+**Owners (team decision 2026-10-15):** Track A (scalar core, `core_env`) — **Nguyễn Hoàng Công Tấn**. Track B (Matrix/MAC engine, `mac_env`) — **Nguyễn Thế Bảo**. Joint: Tasks 0 and 2, later `soc_env`. Task headings below name the track; this table is the only place that maps tracks to people.
+
+| Task | Owner | Status 2026-10-15 |
+|---|---|---|
+| 0 · Tool gate | Tấn: S1 UVM, S3 coverage, S5 toolchain, S6 xsim · Bảo: S2 DPI-C, S4 Verilator ICG, S7 VCD by scope | overdue |
+| 1 · Core cleanup | Track A | done (`69cd798`) |
+| 2 · Week-2 freeze | both (Tấn: `docs/core_isa.md`, W2-1; Bảo: `npu_pkg.sv`, notebook retrain; both sign §6/§7.1) | open |
+| 3 · Complete RV32I | Track A (Tấn takes over, handover step below) | done (`c413abd`) |
+| 4 · Extend reference ISS | Claude **[support]** | open, blocks 5–7 |
+| 5, 6, 7, 9, 12 · M, Zicsr, Zifencei/Zbb, custom-0 push, `rv_iss.c` | Tấn | open |
+| 8 · ITCM/DTCM/MMIO/RVVI | Tấn: core LSU, ITCM, SIM MMIO, RVVI · Bảo: `dtcm_dp` (port B is the engine's interface) | open |
+| 10, 11 · `npu_ref.c`, `mac_engine` D0 | Bảo | 10 overdue, 11 open |
+
+**Handover (Tấn, before Task 5):** the Task 3 RTL was written by Claude and the core history is Bảo's. Tấn reads `docs/core_isa.md` and `docs/core_stall.md`, runs `python tools/rv32i_check/run_all.py` (expected: ISA 44/44, hazard 25/25, random 300/300), then explains each Task 3 change to Bảo. Done when Tấn can trace one `jalr` and one load-use stall through the pipeline without notes.
+
 ## Global Constraints
 
 - Custom opcode `custom-0 = 0001011`. funct3: `000` LOAD_WEIGHT, `001` LOAD_INPUT, `010` COMPUTE (`funct7[0]` = clr), `011` READ_RESULT, `100–111` reserved → op ILLEGAL (§6.1).
@@ -50,7 +65,7 @@
 | 3 | 10–12 | `…-phase3-gating-power.md` | D1 cycle-identical to D0 (SC3); E2 switching data (SC4) |
 | 4 | 13–16 | `…-phase4-mnist-report.md` | MNIST bit-exact (SC5); E4; reproducibility package (SC6); report |
 
-**Schedule risk (flagged now):** Track A in weeks 3–4 carries Tasks 3, 5, 6, 7, 8, 9 and 12. That is the densest stretch of the project. If Task 12 (`rv_iss.c`) slips, it may move into week 5, because Phase 2's `core_env` needs it only from week 5. Nothing else may slip past week 4 without re-planning.
+**Schedule risk (flagged now):** Track A in weeks 3–4 carries Tasks 5, 6, 7, 8, 9 and 12, plus Tấn's handover of a core he did not write. That is the densest stretch of the project. `dtcm_dp` moves to Track B to lighten it. If Task 12 (`rv_iss.c`) slips, it may move into week 5, because Phase 2's `core_env` needs it only from week 5. Track B starts late: Task 10 was due in week 2, so Bảo starts it immediately and Task 11 has no slack. Nothing else may slip past week 4 without re-planning.
 
 ---
 
@@ -230,7 +245,7 @@
 
 ---
 
-### Task 8: ITCM/DTCM, SIM MMIO and the RVVI trace — Track A (memories joint), week 4
+### Task 8: ITCM/DTCM, SIM MMIO and the RVVI trace — Track A; `dtcm_dp` Track B, week 4
 
 **Files:**
 - Create: `rtl/mem/itcm.sv` (16 KB, combinational read, backdoor `$readmemh` from plusarg `+ITCM=<file>`)
