@@ -3,7 +3,7 @@
 - **Project:** Senior Project 2 (Đồ án 2), HCMUTE, class 23161FIE, advisor Phạm Văn Khoa
 - **Team:** Nguyễn Hoàng Công Tấn (23161064) — Track A, scalar core; Nguyễn Thế Bảo (23144002) — Track B, Matrix/MAC engine (assignment 2026-10-15)
 - **Repository:** https://github.com/baonyen1/Mini-NPU-Project
-- **Date:** 2026-10-04 (rev. 2026-10-14: QuestaSim, requant formula, model size confirmed; rev. 2026-10-15: engine is N×M×K = 4×4×4 with dot4 PEs and a 128-bit DTCM port B) · **Status:** approved; §6/§7.1 freeze pending
+- **Date:** 2026-10-04 (rev. 2026-10-14: QuestaSim, requant formula, model size confirmed; rev. 2026-10-15: engine is N×M×K = 4×4×4 with dot4 PEs and a 128-bit DTCM port B; owners; D11–D13 for Phases 2–4) · **Status:** approved; §6/§7.1 freeze pending
 - **Source documents:** `Proposal_Senior_Project_2_MiniNPU_VI.docx`; CoralNPU repository `google-coral/coralnpu` at commit `382b5c1` (2026-10-02)
 
 This spec turns the proposal into a buildable design. It fixes interfaces and semantics so the two tracks can work in parallel. It says *what* each block must do and *how it will be proven*. It does not contain RTL, UVM code or firmware. The students write those.
@@ -27,7 +27,7 @@ All of it is verified with a self-built **SystemVerilog UVM** environment. It mu
 | SC2 | Coverage | The coverage plan in §10.5 is closed on D0 before gating work starts (week 10). |
 | SC3 | D0/D1 equivalence | Same program gives an identical retire trace hash, identical `mcycle` and identical outputs (cycle-identical). Fallback: result-identical, with the reason documented. |
 | SC4 | Switching activity | Report the % change of D1 vs D0 for metrics M1 and M2 (§11) on synthetic and MNIST workloads. No target % is fixed in advance. |
-| SC5 | MNIST | RTL logits and labels match `golden_int8.py` bit-exactly on the chosen test subset. |
+| SC5 | MNIST | RTL logits and labels match `golden_int8.py` bit-exactly on the first 1,000 MNIST test images, on D0 and D1 (D11). One full 10,000-image run on D0 reports the RTL test accuracy, which must equal the golden accuracy. |
 | SC6 | Reproducibility | One command per flow regenerates the regression, coverage and switching-activity data. Tool versions and seeds are recorded in `manifest.yaml`. |
 
 **Evidence boundary.** Power numbers are *switching-activity estimates* from RTL simulation. They are never called "measured power". Functional evidence (UVM) and power evidence (toggles) are reported separately.
@@ -68,6 +68,9 @@ All of it is verified with a self-built **SystemVerilog UVM** environment. It mu
 | D7 | Data is loaded by backdoor `$readmemh` first. Closes open item 4. | Simplest working path. Frontdoor loading is thesis work. |
 | D8 | Golden ↔ scoreboard: DPI-C at block and system level; file comparison for MNIST. Closes open item 5. | Random tests need on-the-fly prediction. MNIST already has a Python golden. |
 | D10 | Engine geometry **N×M×K = 4×4×4**: each PE computes a dot4 per cycle; WBUF/IBUF entries and DTCM port B are 128 bit; K must be a multiple of 4. Team decision 2026-10-15 (option B). | Matches CoralNPU's N×M×K outer-product engine (8×8×4, VDOT = "4 × 8-bit multiplies reduced into 32-bit accumulators"). About 4× fewer engine cycles than 4×4×1, and the longer idle gaps make the D1 result visible on MNIST. |
+| D11 | MNIST image counts: **1,000** test images for the SC5 regression (D0 and D1); **10,000** (the full test set) once on D0 in week 15; **100** images for the E4 switching-activity run. Team decision 2026-10-15. | 1,000 images ≈ 3M cycles per configuration, short enough for regular regression; the full run gives an RTL accuracy figure; 100 images keeps the VCD small. |
+| D12 | Final deliverables: report in **English**, defence slides, and the reproducibility package (SC6). Each report chapter is drafted when its phase ends. Team decision 2026-10-15. | Reusable for the graduation thesis; avoids writing everything in week 16. |
+| D13 | Follow CoralNPU's public structure wherever it exists (datasheet, developer guides, `google-coral/coralnpu`): UVM topology (passive RVVI agent + co-simulation checker against an ISS), backdoor program load, end of test on a completion signal or timeout, a Python regression runner with `--simulator`/`--target`. Write all code ourselves; record every deliberate deviation in §16. Team decision 2026-10-15. | Keeps the design "CoralNPU-inspired" in a checkable way and gives the report a precise contribution boundary. |
 | D9 | Clock gating is gated by hardware-detected idle on the MAC engine only. | Coral gates the whole core on WFI/CSR (`CoreAxi.scala`). Finer granularity is our contribution. |
 
 ### 3.2 Open (the team decides; the default is used if no decision is recorded by the end of week 2)
@@ -338,8 +341,10 @@ The last READ_RESULT has already drained the engine before step 2, so the backdo
 | Env | DUT | Owner | Agents and components |
 |---|---|---|---|
 | `mac_env` | `mac_engine` | B | `cmd_agent` (active: push, read, CSR); `dtcm_agent` (reactive responder holding a 16K-word memory model); predictor calling `npu_ref` (DPI-C); scoreboard; coverage; SVA bound to the DUT |
-| `core_env` | core + ITCM + DTCM, engine replaced by a stub (always ready, logs commands, returns `rd_data = idx`, CSR reads return 0) | A | `rvvi_monitor`; lockstep checker calling `rv_iss` (DPI-C); instruction-stream sequences that backdoor-load ITCM; per-extension covergroups |
-| `soc_env` | `npu_top` | A+B | `rvvi_monitor` with lockstep `rv_iss` (whose custom instructions call `npu_ref`, so the whole system is predicted); `fifo_monitor`; `sim_ctrl_monitor`; MNIST file comparator; D0/D1 equivalence harness |
+| `core_env` | core + ITCM + DTCM, engine replaced by a stub (always ready, logs commands, returns `rd_data = idx`, CSR reads return 0) | A | `npu_rvvi_agent` (passive); `npu_cosim_checker` running `rv_iss` in lockstep (DPI-C), the counterpart of Coral's `coralnpu_rvvi_agent` + `coralnpu_cosim_checker` (D13); instruction-stream sequences that backdoor-load ITCM; per-extension covergroups |
+| `soc_env` | `npu_top` | A+B | `npu_rvvi_agent` + `npu_cosim_checker` with lockstep `rv_iss` (whose custom instructions call `npu_ref`, so the whole system is predicted); `fifo_monitor`; `sim_ctrl_monitor`; MNIST file comparator; D0/D1 equivalence harness |
+
+**Common structure (D13):** every env lives in a package (`mac_env_pkg`, `core_env_pkg`, `soc_env_pkg`); `tb/uvm/tb/npu_tb_top.sv` instantiates the DUT for `soc_env`; each env has a compile file list (`*_dv.f`). Programs and data are loaded by backdoor before reset is released. **End of test:** a `SIM_CTRL` PASS/FAIL write, or the core's halt/fault indication if the W2-1 policy defines one, or a timeout (default 10× the expected cycle count). A timeout is a failure.
 
 ### 10.2 Golden models (C, compiled for DPI-C and as standalone unit-test executables)
 
@@ -366,7 +371,7 @@ The reference keeps its own DTCM image. Every sequence that writes the responder
 |---|---|---|
 | mac | single LDW/LDI/MAC with K=4; K=KMAX; K=0; K=KMAX+4; K=6 (not a multiple of 4); misaligned address (`a[3:0]=4`); out-of-range address; illegal op; clr vs accumulate; forced wrap (repeated accumulate with ±128·±128 operands); FIFO fill to full with back-to-back pushes; READ while busy; W1C clear of error bits | `mac_rand_seq`: random op mix, K ∈ weighted bins, random operands with corner-value bias, random inter-command gaps (0–20 cycles), ≥ 200 seeds |
 | core | per instruction: every M/Zbb/Zicsr/Zifencei instruction including div corners; hazard distance 1/2/3 for each forwarding path; load-use; custom-instruction decode and push timing (with stub); FIFO-full stall (stub with `ready = 0`) | `core_rand_seq`: random ALU/M/Zbb streams with controlled dependency distance, then streams with branches; ≥ 200 seeds |
-| soc | one firmware test per custom instruction; WAR-violation negative test (expects A-SOC-1 to fire); 4×4×K matmul vs `npu_ref`; full layer-sized matmul (784×64); MNIST N batches | `soc_rand_matmul`: Python generates random M×K×N int8 matrices plus firmware data from a seed |
+| soc | one firmware test per custom instruction; WAR-violation negative test (expects A-SOC-1 to fire); 4×4×K matmul vs `npu_ref`; full layer-sized matmul (784×64); MNIST 1,000 images (D11) | `soc_rand_matmul`: Python generates random M×K×N int8 matrices plus firmware data from a seed |
 
 ### 10.4 D0/D1 equivalence harness
 
@@ -409,7 +414,7 @@ Every soc test and every MNIST run is executed in both configurations. Any diffe
 
 **Workloads:**
 - **Synthetic** firmware that alternates NPU bursts (LDW + LDI + MAC with K=256) with scalar busy-loops. Idle ratios are 10, 25, 50, 75 and 90 % (measured by `npu_busy_cyc / mcycle`).
-- **MNIST**, N batches.
+- **MNIST**, 100 images = 25 batches (E4, D11). Cross-check: the MNIST idle ratio (`npu_busy_cyc / mcycle`) placed on the synthetic E2 curve should predict the E4 result to within the spread of the E2 points.
 
 **Window:** firmware writes `SIM_CTRL = MEAS_START` and `MEAS_STOP`. VCD/FST dumping is enabled only inside the window and only for the scope `npu_top.u_mac_engine`.
 
@@ -427,7 +432,7 @@ Every soc test and every MNIST run is executed in both configurations. Any diffe
 ```
 mini-npu/
   rtl/{core,npu,mem,top}/   rtl/npu/icg_cell.sv   rtl/npu_pkg.sv
-  tb/uvm/{common,mac_env,core_env,soc_env}/   tb/sva/
+  tb/uvm/{common,mac_env,core_env,soc_env,tb}/   tb/sva/
   model/c/{npu_ref.c,rv_iss.c,tests/}   model/py/{golden_int8.py,pack_weights.py,gen_matmul.py}
   sw/{crt0.S,link.ld,npu.h,tests/,mnist/,synthetic/}
   sim/questa/   sim/verilator/   power/   notebooks/   docs/
@@ -435,7 +440,7 @@ mini-npu/
 ```
 
 - `manifest.yaml` records the QuestaSim (and licence type), Vivado, Verilator, GCC and Python versions, the git hash, seeds and the test list.
-- The regression entry point prints pass/fail per test × seed and merges coverage.
+- The regression entry point `run.py --simulator {questa,xsim} --target <test|suite> [--config d0|d1] [--seeds N]` (same interface style as Coral's `utils/run_uvm_regression.py`, D13) prints pass/fail per test × seed and merges coverage. `run.py all` regenerates every SC1–SC5 artefact and the E2/E4 data (SC6).
 - Raw logs and VCDs are kept under `out/<date>/<config>/`. Large files are not committed; their hashes are recorded instead.
 
 ## 13. Week-1 smoke-test gate
@@ -463,9 +468,11 @@ Each item is answered "works / does not work, with evidence (log)". The proposal
 | 7–9 | core random + coverage | mac random + coverage | soc tests, coverage closure (SC2) |
 | 10–11 | — | `icg_cell`, D1 | equivalence harness, D1 regression (SC3) |
 | 12 | synthetic firmware | `toggle_count.py` | E2 data |
-| 13–14 | MNIST firmware | `pack_weights.py` | MNIST bit-exact (SC5) |
-| 15 | | | E4 MNIST toggles |
-| 16 | | | report, slides, reproducibility package |
+| 13–14 | MNIST firmware | `pack_weights.py`, golden files | MNIST 1,000 images bit-exact on D0/D1 (SC5); report skeleton |
+| 15 | | E4 MNIST toggles (100 images) | full 10,000-image run (D0); `run.py all` on a clean clone (SC6) |
+| 16 | | | English report, slides, reproducibility package (D12) |
+
+Report chapters are drafted at phase ends: verification (week 10), power (week 13), MNIST and conclusions (week 15).
 
 The detailed task-level plan (with "done" tests per task) is written next in `docs/superpowers/plans/`.
 
@@ -474,7 +481,7 @@ The detailed task-level plan (with "done" tests per task) is written next in `do
 | Risk | Mitigation |
 |---|---|
 | No full QuestaSim licence, or it lacks a feature (UVM/DPI/coverage) | Found in week 1 (S1–S3). Fallback: xsim (S6). Last resort: Verilator UVM or pyuvm. |
-| Questa run time too long for MNIST batches | Keep MNIST regression to a few batches on Questa; long runs on Verilator with a Questa cross-check (D1a). |
+| Questa run time too long for MNIST batches | Measure in week 14. For scale only: Coral reports its RTL Verilator model at about 15 kcycles/s (a different, larger design), which would put 1,000 images (≈3M cycles) at a few minutes. If too slow: long runs on Verilator with a Questa cross-check (D1a). Cut order if late: drop the 10,000-image run, then reduce E4 to 20 images; SC3 on MNIST and the report are never cut. |
 | `rv_iss` is late, blocking `core_env` | Keep the ISS minimal and test it first. Interim: riscv-arch-test self-checking signatures as directed tests. |
 | Interface churn between tracks | Freeze §6 and §7.1 at the end of week 2. Changes after that need both students' sign-off and a spec update. |
 | DTCM WAR bugs in firmware | Software rule plus A-SOC-1, and a negative test that proves the assertion fires. |
@@ -492,9 +499,13 @@ The detailed task-level plan (with "done" tests per task) is written next in `do
 | Operand staging | `vle8` from DTCM into a 32×128-bit vector register file | engine LOAD from DTCM into WBUF/IBUF |
 | Matrix compute | outer-product engine N×M×K (docs: typical 8×8×4 = 256 MAC/cycle, VDOT dot4 per PE); repo VME: 16 tiles `mt0..mt15`, INT8/FP32/BF16 | N×M×K = 4×4×4 = 64 MAC/cycle, int8 dot4 PEs, 1 tile |
 | Result path | `vtmv.v.t` then `vse32` | READ_RESULT to a scalar register |
-| Memory | banked DTCM (4 × 32 b) + crossbar, 128-bit DBus, 32 KB default | DTCM 4 banks × 32 b, 64 KB; port A 32 b (core), port B 128 b (engine) |
+| Memory | datasheet: 8 KB ITCM, 32 KB DTCM, single-cycle SRAM; repo: banked DTCM (4 × 32 b) + crossbar, 128-bit DBus | ITCM 16 KB; DTCM 4 banks × 32 b, 64 KB (the model needs 56.8 KB, D6); port A 32 b (core), port B 128 b (engine) |
 | Clock gating | whole-core gate on WFI/CSR (`CoreAxi.scala`) | MAC-engine gate on hardware-detected idle |
-| Verification | UVM on VCS/Verilator, RVVI agent, Spike cosim | self-built UVM, RVVI-style trace, own C ISS and C NPU model |
+| Verification | cocotb suites; UVM on VCS/Verilator with `coralnpu_rvvi_agent` (passive) and `coralnpu_cosim_checker` against the MPACT simulator (`tests/uvm/env/coralnpu_env_pkg.sv`, main branch, read 2026-10-15); backdoor ELF load; end on `halted`/`fault` or timeout | self-built SV UVM only; `npu_rvvi_agent` + `npu_cosim_checker` against our own `rv_iss`; own C NPU model; backdoor `$readmemh`; end on `SIM_CTRL`, halt/fault or timeout |
+| Power evidence | power targets in the guides ("10 mW power envelope"); cocotb VCS split flow kept "for gate-level power analysis" | RTL switching-activity estimates only (no synthesis in Senior Project 2) |
+| Workload | MobileNet via LiteRT; RVV matmul examples (`tests/cocotb/rvv/ml_ops/`) | 784-64-32-10 int8 MLP on MNIST, bare-metal C |
+
+**Matrix-engine status.** The developer-guide introduction still says the matrix execution unit is planned for a future release, while the repository at `382b5c1` contains an experimental VME (Zvt) implementation. Mini-NPU follows the documented semantics (outer product, N×M×K, dot4 into int32) and does not depend on the experimental RTL.
 
 No CoralNPU RTL or testbench code is reused. CoralNPU is cited as the architectural inspiration, and its source files are cited where a pattern was studied (`ClockGate.sv`, `tests/uvm` structure, `vme_matmul_test_program.cc`).
 
@@ -502,7 +513,8 @@ No CoralNPU RTL or testbench code is reused. CoralNPU is cited as the architectu
 
 - Proposal references [1]–[12] apply.
 - Google, `google-coral/coralnpu`, commit `382b5c1`: `doc/overview.md`, `doc/microarch/*.md`, `hdl/verilog/ClockGate.sv`, `hdl/chisel/src/coralnpu/CoreAxi.scala`, `hdl/verilog/rvv/design/Zvt/`, `tests/uvm/README.md`, `tests/cocotb/vme_test/vme_matmul_test_program.cc`.
-- Google, Coral NPU developer guides: Architecture overview; ML inference execution engines; Datasheet; Instruction decode and dispatch (developers.google.com/coral/guides).
+- Google, Coral NPU developer guides (developers.google.com/coral/guides): Introduction to Coral NPU (`intro-coralNPU`); Datasheet (`hardware/datasheet`); ML inferencing (`hardware/arch_ml`); Decode and dispatch (`hardware/decode-dispatch`); IP evaluation guide (`hardware/evaluation`); Performance and power (`power`); Bare-metal programming (`software/bare-metal-prog`); Matrix multiplication examples (`software/examples-matmuls`). Read 2026-10-15.
+- Google, `google-coral/coralnpu` main branch (read 2026-10-15): `tests/uvm/README.md`, `tests/uvm/env/coralnpu_env_pkg.sv`, `tests/cocotb/README.md`.
 - [PH] D. A. Patterson, J. L. Hennessy, *Computer Organization and Design: The Hardware/Software Interface, RISC-V Edition*, 2nd ed., Morgan Kaufmann, 2021.
 - [ST] W. Stallings, *Computer Organization and Architecture: Designing for Performance*, 11th ed., Pearson, 2019.
 - Chapter-to-task reading guide: `docs/references/README.md`.
