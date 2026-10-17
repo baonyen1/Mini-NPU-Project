@@ -355,6 +355,7 @@ The last READ_RESULT has already drained the engine before step 2, so the backdo
 - `npu_ref_read(idx)`
 - `npu_ref_status()`
 - `npu_ref_csr_write(addr, data)`
+- `npu_ref_csr_read(addr)`: returns `npu_status` for 0x7C0, the stored value for 0x7C1, 0 for any other address (needed by `ISS_FULL` to serve CSR reads)
 
 The reference keeps its own DTCM image. Every sequence that writes the responder memory also calls `npu_ref_mem_write`.
 

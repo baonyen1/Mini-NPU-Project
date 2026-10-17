@@ -314,6 +314,7 @@
   uint32_t npu_ref_read(uint32_t idx);                           /* uses idx & 0xF */
   uint32_t npu_ref_status(void);
   void     npu_ref_csr_write(uint32_t addr, uint32_t data);       /* 0x7C0 W1C, 0x7C1 set */
+  uint32_t npu_ref_csr_read(uint32_t addr);                       /* 0x7C0 status, 0x7C1 stored value, else 0 */
   ```
   `npu_ref_status()` returns the §6.4 layout with busy = 0, fifo_empty = 1, fifo_full = 0 (the model is untimed).
 

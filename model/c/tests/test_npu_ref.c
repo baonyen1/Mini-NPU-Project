@@ -17,8 +17,6 @@
 
 #define RUN(t) do { printf("  %-28s", #t); t(); printf("ok\n"); } while (0)
 
-#define ERR_ALL (NPU_ST_ERR_K | NPU_ST_ERR_ADDR | NPU_ST_ERR_ILLEGAL | NPU_ST_ERR_ALIGN)
-
 /* ---- helpers ---------------------------------------------------------- */
 
 /* 4 int8 lanes -> one DTCM word, lane 0 = LSB (spec 6.2). */
@@ -32,7 +30,7 @@ static int32_t lane(uint32_t w, int t) { return (int8_t)(w >> (8 * t)); }
 
 static uint32_t widx(uint32_t byte_addr) { return (byte_addr - NPU_DTCM_BASE) / 4u; }
 static void put_word(uint32_t byte_addr, uint32_t w) { npu_ref_mem_write(widx(byte_addr), w); }
-static uint32_t errs(void) { return npu_ref_status() & ERR_ALL; }
+static uint32_t errs(void) { return npu_ref_status() & NPU_ERR_MASK; }
 
 static void fill(uint32_t byte_addr, uint32_t nwords, uint32_t w)
 {
@@ -305,17 +303,123 @@ static void test_w1c(void)
     npu_ref_cmd(NPU_OP_LDW, 0x0001FFF0u, 8, 0);       /* err_addr */
     npu_ref_cmd(NPU_OP_ILLEGAL, W0, 4, 0);            /* err_illegal */
     npu_ref_cmd(NPU_OP_LDI, 0x00010004u, 4, 0);       /* err_align */
-    CHECK_EQ(errs(), ERR_ALL);                        /* sticky: all four are set */
+    CHECK_EQ(errs(), NPU_ERR_MASK);                        /* sticky: all four are set */
 
     npu_ref_csr_write(NPU_CSR_STATUS, 0);             /* writing 0 clears nothing */
-    CHECK_EQ(errs(), ERR_ALL);
+    CHECK_EQ(errs(), NPU_ERR_MASK);
     npu_ref_csr_write(NPU_CSR_STATUS, 0x7);           /* RO bits: no effect */
-    CHECK_EQ(npu_ref_status(), ERR_ALL | NPU_ST_FIFO_EMPTY);
+    CHECK_EQ(npu_ref_status(), NPU_ERR_MASK | NPU_ST_FIFO_EMPTY);
     npu_ref_csr_write(NPU_CSR_STATUS, NPU_ST_ERR_K);  /* clears only err_k */
-    CHECK_EQ(errs(), ERR_ALL & ~NPU_ST_ERR_K);
+    CHECK_EQ(errs(), NPU_ERR_MASK & ~NPU_ST_ERR_K);
     npu_ref_csr_write(NPU_CSR_STATUS, 0xF00);         /* clears the rest */
     CHECK_EQ(errs(), 0);
     CHECK_EQ(npu_ref_status(), NPU_ST_FIFO_EMPTY);
+}
+
+/* ILLEGAL is decided from `op` alone: whatever K, address or clr come with it,
+ * the only effect is err_illegal and nothing else changes. Ops above 3 cannot
+ * occur on the 2-bit cmd_op port, but the model must not misread them. */
+static void test_illegal_wins_over_other_checks(void)
+{
+    static const uint32_t ks[]    = { 0, 4, 6, 1028 };
+    static const uint32_t addrs[] = { W0, 0x00010004u, 0xFFFFFFF0u };
+    for (unsigned a = 0; a < sizeof addrs / sizeof addrs[0]; a++)
+        for (unsigned n = 0; n < sizeof ks / sizeof ks[0]; n++) {
+            expect_dropped(NPU_OP_ILLEGAL, addrs[a], ks[n], 0, NPU_ST_ERR_ILLEGAL);
+            expect_dropped(NPU_OP_ILLEGAL, addrs[a], ks[n], 1, NPU_ST_ERR_ILLEGAL);
+        }
+    expect_dropped(4u,          W0, 4, 0, NPU_ST_ERR_ILLEGAL);
+    expect_dropped(0xFFFFFFFFu, W0, 0, 1, NPU_ST_ERR_ILLEGAL);
+}
+
+/* reset must clear every piece of state. Each check below fails if exactly one
+ * piece is left out: errors, accumulators, DTCM, WBUF, IBUF.
+ * Note: the RTL buffers are NOT reset (spec 7.2); the model clears them only to
+ * stay deterministic, so no random sequence may rely on this. */
+static void test_reset_clears_everything(void)
+{
+    hand_setup();
+    hand_run();
+    npu_ref_cmd(NPU_OP_LDW, 0x00010004u, 4, 0);          /* leave an error bit set */
+    CHECK_EQ(errs(), NPU_ST_ERR_ALIGN);
+
+    npu_ref_reset();
+    CHECK_EQ(npu_ref_status(), NPU_ST_FIFO_EMPTY);       /* errors gone */
+    check_all_acc(0u);                                   /* accumulators gone */
+
+    /* DTCM gone: loading the old addresses must now give zeros. */
+    npu_ref_cmd(NPU_OP_LDW, W0, 4, 0);
+    npu_ref_cmd(NPU_OP_LDI, I0, 4, 0);
+    npu_ref_cmd(NPU_OP_MAC, 0, 4, 1);
+    check_all_acc(0u);
+
+    /* WBUF gone: only IBUF is loaded (with non-zero data), so any product
+     * that is not zero came from a stale weight. */
+    hand_setup();
+    hand_run();
+    npu_ref_reset();
+    fill(I0, 4, 0x01010101u);
+    npu_ref_cmd(NPU_OP_LDI, I0, 4, 0);
+    npu_ref_cmd(NPU_OP_MAC, 0, 4, 1);
+    check_all_acc(0u);
+
+    /* IBUF gone: the mirror image. */
+    hand_setup();
+    hand_run();
+    npu_ref_reset();
+    fill(W0, 4, 0x01010101u);
+    npu_ref_cmd(NPU_OP_LDW, W0, 4, 0);
+    npu_ref_cmd(NPU_OP_MAC, 0, 4, 1);
+    check_all_acc(0u);
+    CHECK_EQ(errs(), 0);
+}
+
+/* The buffers keep their old quads (spec 7.2): a short LOAD does not clear the
+ * quads behind it, and COMPUTE reads entries 0..K/4-1 whatever the last K was. */
+static void test_stale_quads_survive_short_load(void)
+{
+    const uint32_t WA = 0x00010000u, IA = 0x00010100u;   /* separate regions */
+    npu_ref_reset();
+    put_word(WA +  0, pack4(1, 1, 1, 1));                /* W quad 0, row 0 */
+    put_word(WA + 16, pack4(2, 2, 2, 2));                /* W quad 1, row 0 */
+    put_word(IA +  0, pack4(1, 1, 1, 1));                /* I quad 0, image 0 */
+    put_word(IA + 16, pack4(1, 1, 1, 1));                /* I quad 1, image 0 */
+    npu_ref_cmd(NPU_OP_LDW, WA, 8, 0);                   /* WBUF quads 0 and 1 */
+    npu_ref_cmd(NPU_OP_LDI, IA, 8, 0);
+    put_word(WA, pack4(3, 3, 3, 3));                     /* new data for quad 0 only */
+    npu_ref_cmd(NPU_OP_LDW, WA, 4, 0);                   /* K=4: WBUF quad 1 must stay */
+    npu_ref_cmd(NPU_OP_MAC, 0, 8, 1);
+    CHECK_EQ(npu_ref_read(0), 3 * 4 + 2 * 4);            /* new quad 0 + stale quad 1 */
+    CHECK_EQ(errs(), 0);
+}
+
+static void test_csr_read(void)
+{
+    npu_ref_reset();
+    CHECK_EQ(npu_ref_csr_read(NPU_CSR_STATUS), NPU_ST_FIFO_EMPTY);
+    CHECK_EQ(npu_ref_csr_read(NPU_CSR_BUSY_CYC), 0);
+
+    npu_ref_cmd(NPU_OP_MAC, 0, 6, 0);                    /* err_k */
+    CHECK_EQ(npu_ref_csr_read(NPU_CSR_STATUS), npu_ref_status());
+    CHECK_EQ(npu_ref_csr_read(NPU_CSR_STATUS), NPU_ST_FIFO_EMPTY | NPU_ST_ERR_K);
+
+    npu_ref_csr_write(NPU_CSR_BUSY_CYC, 0x12345678u);    /* plain stored value */
+    CHECK_EQ(npu_ref_csr_read(NPU_CSR_BUSY_CYC), 0x12345678u);
+    CHECK_EQ(npu_ref_csr_read(NPU_CSR_STATUS), NPU_ST_FIFO_EMPTY | NPU_ST_ERR_K);
+
+    npu_ref_csr_write(NPU_CSR_STATUS, NPU_ST_ERR_K);     /* W1C must not touch busy_cyc */
+    CHECK_EQ(npu_ref_csr_read(NPU_CSR_BUSY_CYC), 0x12345678u);
+    CHECK_EQ(npu_ref_csr_read(NPU_CSR_STATUS), NPU_ST_FIFO_EMPTY);
+
+    /* any other address: reads 0, writes are ignored */
+    npu_ref_csr_write(0x7C2u, 0xFFFFFFFFu);
+    npu_ref_csr_write(0x300u, 0xFFFFFFFFu);
+    CHECK_EQ(npu_ref_csr_read(0x7C2u), 0);
+    CHECK_EQ(npu_ref_csr_read(0x300u), 0);
+    CHECK_EQ(npu_ref_csr_read(NPU_CSR_BUSY_CYC), 0x12345678u);
+
+    npu_ref_reset();
+    CHECK_EQ(npu_ref_csr_read(NPU_CSR_BUSY_CYC), 0);     /* reset clears busy_cyc */
 }
 
 int main(void)
@@ -338,6 +442,10 @@ int main(void)
     RUN(test_addr_misaligned);
     RUN(test_mac_ignores_addr);
     RUN(test_illegal_op);
+    RUN(test_illegal_wins_over_other_checks);
+    RUN(test_reset_clears_everything);
+    RUN(test_stale_quads_survive_short_load);
+    RUN(test_csr_read);
     RUN(test_w1c);
     printf("npu_ref: all tests passed\n");
     return 0;

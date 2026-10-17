@@ -4,8 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define NPU_ERR_MASK (NPU_ST_ERR_K | NPU_ST_ERR_ADDR | NPU_ST_ERR_ILLEGAL | NPU_ST_ERR_ALIGN)
-
 /* ---- state (spec 6.2, 6.4) -------------------------------------------- */
 static uint32_t dtcm[NPU_DTCM_WORDS];       /* the model's own DTCM image            */
 static uint32_t wbuf[NPU_KMAX / 4][4];      /* 256 quads; wbuf[s][i] = word i of quad s */
@@ -59,7 +57,7 @@ static void run_mac(uint32_t k, uint32_t clr)
     }
 }
 
-/* ---- public API: status -> reset -> mem_write -> read -> cmd -> csr_write ---- */
+/* ---- public API ------------------------------------------------------- */
 
 uint32_t npu_ref_status(void)
 {
@@ -146,4 +144,15 @@ void npu_ref_csr_write(uint32_t addr, uint32_t data)
         busy_cyc = data;                        /* plain stored value (spec 6.4) */
     }
     /* any other CSR address: ignored */
+}
+
+uint32_t npu_ref_csr_read(uint32_t addr)
+{
+    if (addr == NPU_CSR_STATUS) {
+        return npu_ref_status();
+    }
+    if (addr == NPU_CSR_BUSY_CYC) {
+        return busy_cyc;
+    }
+    return 0u;                                  /* any other CSR address reads 0 */
 }

@@ -22,6 +22,7 @@ enum { NPU_OP_LDW = 0, NPU_OP_LDI = 1, NPU_OP_MAC = 2, NPU_OP_ILLEGAL = 3 };
 #define NPU_ST_ERR_ADDR    (1u << 9)
 #define NPU_ST_ERR_ILLEGAL (1u << 10)
 #define NPU_ST_ERR_ALIGN   (1u << 11)
+#define NPU_ERR_MASK       (NPU_ST_ERR_K | NPU_ST_ERR_ADDR | NPU_ST_ERR_ILLEGAL | NPU_ST_ERR_ALIGN)
 
 #define NPU_CSR_STATUS     0x7C0u
 #define NPU_CSR_BUSY_CYC   0x7C1u
@@ -32,5 +33,6 @@ void     npu_ref_cmd(uint32_t op, uint32_t addr, uint32_t k, uint32_t clr);
 uint32_t npu_ref_read(uint32_t idx);                           /* uses idx & 0xF */
 uint32_t npu_ref_status(void);
 void     npu_ref_csr_write(uint32_t addr, uint32_t data);      /* 0x7C0 W1C, 0x7C1 set */
+uint32_t npu_ref_csr_read(uint32_t addr);                      /* 0x7C0 status, 0x7C1 busy_cyc, else 0 */
 
 #endif
