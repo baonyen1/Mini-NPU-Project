@@ -19,3 +19,10 @@ _to_delete/
 
 # editor settings (machine-specific paths)
 .vscode/
+sim/questa/smoke/work/
+sim/questa/smoke/out/
+sim/questa/smoke/*.vcd
+transcript
+modelsim.ini
+*.wlf
+vsim.wlf

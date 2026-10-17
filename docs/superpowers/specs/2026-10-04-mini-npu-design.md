@@ -79,7 +79,7 @@ All of it is verified with a self-built **SystemVerilog UVM** environment. It mu
 |---|---|---|---|
 | O1 | Requantization between layers (open item 2) | **A**: multiply + shift + clamp (`mul`, `srai`, `max`/`min`). **B**: shift only. | A (this is what `notebooks/MiniNPU_MLP.py` implements; confirm) |
 | O2 | Exact requant formula | Formula recorded in §9.3 from the notebook. The per-layer `M`, `S` values come from the retrained 784-64-32-10 model (`requant.json`). | formula fixed, values pending retrain |
-| O3 | QuestaSim licence available to the team (lab or university licence, not the FPGA Starter edition) | S1–S3 on the actual licence. If `randomize`/`covergroup` fail, fall back to xsim. | QuestaSim |
+| O3 | QuestaSim licence available to the team (lab or university licence, not the FPGA Starter edition) | S1–S3 on the actual licence. If `randomize`/`covergroup` fail, fall back to xsim. | QuestaSim. **Closed 2026-10-17**: S1-S3 pass on QuestaSim 10.7c (`docs/smoke/results.md`); xsim fallback verified (S6). |
 
 ## 4. System architecture
 

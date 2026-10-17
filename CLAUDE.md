@@ -188,7 +188,7 @@ This is a small design *inspired by* CoralNPU (`google-coral/coralnpu`, commit `
 
 - `sim/`, `tb/`, `sw/`, `power/` and `model/py` contain only READMEs. Nothing there runs yet.
 - `model/c` holds `npu_ref` (Task 10, done 2026-10-17): `make -C model/c test` is green. One open item remains: the precedence of `ILLEGAL` over `K = 0` (code: `ILLEGAL` wins; spec §6.3 says "K = 0 (any op)"). Bảo and Tấn decide and record it in the spec; RTL (Task 11) must follow. `rv_iss.c` does not exist yet.
-- The QuestaSim licence type is unknown until Task 0 (S1–S3). Questa Starter/FPGA editions reject `randomize`/`covergroup`. The fallback is xsim (S6).
+- QuestaSim 10.7c runs UVM, `randomize`, `covergroup` and DPI-C (Task 0, 2026-10-17; `docs/smoke/results.md`). Start it with `C:\questasim64_10.7c\win64` on PATH; use `-voptargs=+acc` whenever a VCD or waveform needs inner scopes. A DPI function cannot return `bit [31:0]` (use `int unsigned` or an output argument). Verilator is not installed on Bảo's machine yet (S4 open). xsim is a verified fallback.
 - `tools/rv32i_check` compiles only `rtl/core/**/*.v` (`iverilog -g2012`). A new core file named `.sv`, or one that imports `npu_pkg`, is not picked up until `run.py` is updated ([support]).
 - The harness memory model is still Senior Project 1's: 256-word IMEM and DMEM, with `program.hex` in the harness folder. It moves to the spec memory map in Task 8 (`MEMMAP="spec"`).
 - `fence`, `ecall`, `ebreak` and unknown encodings execute as NOP until decision W2-1 is recorded (`docs/core_isa.md` §4).
