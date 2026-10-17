@@ -187,7 +187,7 @@ This is a small design *inspired by* CoralNPU (`google-coral/coralnpu`, commit `
 ## 10. Gotchas (as of 2026-10-17; update this list when it changes)
 
 - `sim/`, `tb/`, `sw/`, `power/` and `model/py` contain only READMEs. Nothing there runs yet.
-- `model/c` holds the Task 10 scaffold. `npu_ref.h`, the `Makefile` and the unit tests are complete; `npu_ref.c` is a TODO skeleton (Bảo's). `make -C model/c test` fails until it is filled in. That is the expected Step 2 of Task 10, not a broken build.
+- `model/c` holds `npu_ref` (Task 10, done 2026-10-17): `make -C model/c test` is green. One open item remains: the precedence of `ILLEGAL` over `K = 0` (code: `ILLEGAL` wins; spec §6.3 says "K = 0 (any op)"). Bảo and Tấn decide and record it in the spec; RTL (Task 11) must follow. `rv_iss.c` does not exist yet.
 - The QuestaSim licence type is unknown until Task 0 (S1–S3). Questa Starter/FPGA editions reject `randomize`/`covergroup`. The fallback is xsim (S6).
 - `tools/rv32i_check` compiles only `rtl/core/**/*.v` (`iverilog -g2012`). A new core file named `.sv`, or one that imports `npu_pkg`, is not picked up until `run.py` is updated ([support]).
 - The harness memory model is still Senior Project 1's: 256-word IMEM and DMEM, with `program.hex` in the harness folder. It moves to the spec memory map in Task 8 (`MEMMAP="spec"`).

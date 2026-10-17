@@ -28,7 +28,7 @@
 | 4 · Extend reference ISS | Claude **[support]** | open, blocks 5–7 |
 | 5, 6, 7, 9, 12 · M, Zicsr, Zifencei/Zbb, custom-0 push, `rv_iss.c` | Tấn | open |
 | 8 · ITCM/DTCM/MMIO/RVVI | Tấn: core LSU, ITCM, SIM MMIO, RVVI · Bảo: `dtcm_dp` (port B is the engine's interface) | open |
-| 10, 11 · `npu_ref.c`, `mac_engine` D0 | Bảo | 10 overdue, 11 open |
+| 10, 11 · `npu_ref.c`, `mac_engine` D0 | Bảo | 10 done 2026-10-17, 11 open |
 
 **Handover (Tấn, before Task 5):** the Task 3 RTL was written by Claude and the core history is Bảo's. Tấn reads `docs/core_isa.md` and `docs/core_stall.md`, runs `python tools/rv32i_check/run_all.py` (expected: ISA 44/44, hazard 25/25, random 300/300), then explains each Task 3 change to Bảo. Done when Tấn can trace one `jalr` and one load-use stall through the pipeline without notes.
 
@@ -398,7 +398,7 @@
 
 - [ ] Task 0: `docs/smoke/results.md` complete; licence type recorded, O3 closed; proposal updated if S1–S3 passed
 - [ ] Tasks 1–9: `python tools/rv32i_check/run_all.py` (with `MEMMAP="spec"`) runs all suites green, including Review Focus tests 1–3
-- [ ] Task 10: `make -C model/c test` green, including Review Focus 4–5
+- [x] Task 10: `make -C model/c test` green, including Review Focus 4–5 (22/22, 2026-10-17)
 - [ ] Task 11: directed engine suite green on QuestaSim; Verilator lint clean
 - [ ] Task 12: green, or explicitly moved to week 5 with the reason noted
 - [ ] Spec frozen (§6, §7.1) and O1/O2 recorded
