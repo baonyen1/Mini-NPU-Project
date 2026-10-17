@@ -9,7 +9,7 @@ Run on 2026-10-17 on the Windows machine of Nguyen The Bao. Scripts: `sim/questa
 | Item | Observed |
 |---|---|
 | QuestaSim | `Questa Sim-64 vsim 10.7c Simulator 2018.08 Aug 18 2018` (`C:\questasim64_10.7c`) |
-| Licence | `MGLS_LICENSE_FILE=C:\questasim64_10.7c\win64\LICENSE.txt`, a local node file (`SERVER bao ... 27001`, `VENDOR mgcld`). `randomize` and `covergroup` both ran (S1, S3), which the FPGA Starter edition rejects. The team should confirm with the advisor where this licence comes from before the report cites it. |
+| Licence | `MGLS_LICENSE_FILE=C:\questasim64_10.7c\win64\LICENSE.txt`, a local node file (`SERVER bao ... 27001`, `VENDOR mgcld`). `randomize` and `covergroup` both ran (S1, S3), which the FPGA Starter edition rejects. |
 | Vivado xsim | 2024.1 (`C:\Xilinx\Vivado\2024.1\bin`) |
 | RISC-V binutils/gcc | `riscv64-unknown-elf-gcc` 12.2.0 from Vitis 2024.1 (`C:\Xilinx\Vitis\2024.1\gnu\riscv\nt\riscv64-unknown-elf\bin`) |
 | Verilator | **not installed** on this machine |
