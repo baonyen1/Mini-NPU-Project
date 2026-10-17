@@ -16,3 +16,6 @@ docs/references/*.pdf
 program.hex
 rtl_state.txt
 _to_delete/
+
+# editor settings (machine-specific paths)
+.vscode/
