@@ -21,7 +21,7 @@
 
 | Task | Owner | Status 2026-10-15 |
 |---|---|---|
-| 0 · Tool gate | Tấn: S1 UVM, S3 coverage, S5 toolchain, S6 xsim · Bảo: S2 DPI-C, S4 Verilator ICG, S7 VCD by scope | overdue |
+| 0 · Tool gate | Tấn: S1 UVM, S3 coverage, S5 toolchain, S6 xsim · Bảo: S2 DPI-C, S4 Verilator ICG, S7 VCD by scope | closed 2026-10-18: S1–S3, S5–S7 pass (`docs/smoke/results.md`); S4 Verilator part skipped by team decision |
 | 1 · Core cleanup | Track A | done (`69cd798`) |
 | 2 · Week-2 freeze | both (Tấn: `docs/core_isa.md`, W2-1; Bảo: `npu_pkg.sv`, notebook retrain; both sign §6/§7.1) | open |
 | 3 · Complete RV32I | Track A (Tấn takes over, handover step below) | done (`c413abd`) |
