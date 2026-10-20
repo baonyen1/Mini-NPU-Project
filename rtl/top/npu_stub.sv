@@ -1,3 +1,5 @@
+`timescale 1ns / 1ps
+
 // Engine stand-in for core-only tests (plan Task 9). Port names follow spec 7.1.
 //
 // Command path: cmd_ready follows the plusarg pattern +STUB_READY=<bits>

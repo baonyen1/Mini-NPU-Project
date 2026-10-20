@@ -84,11 +84,12 @@ Mục lục: [1. Kiến trúc tổng thể](#1-kiến-trúc-tổng-thể) · [2.
 | **Structural hazard** | Hai lệnh cần cùng một tài nguyên. | Ví dụ: bộ chia đang bận. |
 | **RAW / WAR / WAW** | Đọc-sau-ghi / ghi-sau-đọc / ghi-sau-ghi trên cùng một chỗ. | RAW qua thanh ghi (forwarding); WAR qua DTCM (quy tắc phần mềm + assertion A-SOC-1). |
 | **Forwarding / Bypass** | Chuyển kết quả từ tầng sau về EX ngay, không chờ ghi vào thanh ghi. | Từ EX/MEM và MEM/WB về EX. |
-| **Load-use hazard** | Lệnh ngay sau `lw` dùng kết quả `lw` (chưa đọc xong). | Stall 1 chu kỳ, nguồn stall duy nhất hiện có. |
-| **Stall** | Giữ lệnh đứng yên một hoặc nhiều chu kỳ. | Thiết kế trong `docs/core_stall.md`. |
+| **Load-use hazard** | Lệnh ngay sau `lw` dùng kết quả `lw` (chưa đọc xong). | Stall 1 chu kỳ. `READ_RESULT` cũng được coi như `lw` (Task 9). |
+| **Stall** | Giữ lệnh đứng yên một hoặc nhiều chu kỳ. | Bốn nguồn đã có trong RTL: load-use, bộ chia bận, FIFO đầy, `READ_RESULT` chờ engine. Xem `docs/core_stall.md`. |
 | **Bubble** | Lệnh rỗng (NOP) chèn vào pipeline khi stall. | Chèn vào thanh ghi ngay sau tầng bị stall. |
 | **Flush** | Xóa các lệnh đã vào pipeline nhưng không được chạy. | Khi branch taken: flush IF/ID và ID/EX. |
 | **Redirect** | Đổi PC sang địa chỉ đích của branch/jump. | Chỉ được redirect khi EX không bị stall. |
+| **Held operand** (operand giữ lại) | Khi tầng EX bị giữ nhiều chu kỳ, lệnh cũ hơn đang forward giá trị cho nó sẽ rời pipeline, nên thanh ghi operand ở ID/EX phải được nạp lại giá trị EX đang thấy. | Task 9, `held_operand_0/1`, test `mem_stall_stale_operand`. |
 | **Branch penalty** | Số chu kỳ mất khi đoán sai/nhảy. | 2 chu kỳ. |
 | **Retire** | Lệnh hoàn thành ở WB và được tính là đã chạy. | `minstret` đếm số lệnh retire. |
 | **Valid bit** | Bit đánh dấu thanh ghi pipeline chứa lệnh thật hay bubble. | Cần để đếm `minstret` và trace đúng. |

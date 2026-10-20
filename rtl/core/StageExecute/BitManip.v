@@ -39,8 +39,11 @@ localparam BB_ORC_B  = 5'd15;
 localparam BB_REV8   = 5'd16;
 
 wire [4:0] shamt = b[4:0];
+// {a, a} shifted: the half that holds the rotated value is used, the other half is dropped
+/* verilator lint_off UNUSEDSIGNAL */
 wire [63:0] rol64 = {a, a} << shamt;
 wire [63:0] ror64 = {a, a} >> shamt;
+/* verilator lint_on UNUSEDSIGNAL */
 wire a_lt_b_s = ($signed(a) < $signed(b));
 wire a_lt_b_u = (a < b);
 
@@ -57,18 +60,18 @@ always @(*) begin
         BB_CLZ: begin
             count = 6'd32;
             for (i = 0; i < 32; i = i + 1)
-                if (a[i]) count = 6'd31 - i;       // the highest set bit is assigned last
+                if (a[i]) count = 6'd31 - i[5:0];  // the highest set bit is assigned last
             result = {26'b0, count};
         end
         BB_CTZ: begin
             count = 6'd32;
             for (i = 31; i >= 0; i = i - 1)
-                if (a[i]) count = i;               // the lowest set bit is assigned last
+                if (a[i]) count = i[5:0];          // the lowest set bit is assigned last
             result = {26'b0, count};
         end
         BB_CPOP: begin
             for (i = 0; i < 32; i = i + 1)
-                count = count + a[i];
+                count = count + {5'b0, a[i]};
             result = {26'b0, count};
         end
         BB_MAX:    result = a_lt_b_s ? b : a;

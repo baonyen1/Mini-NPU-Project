@@ -77,13 +77,14 @@ Students work on Windows (PowerShell, `python`). CI runs on Ubuntu 24.04 (`pytho
 
 ```powershell
 # Core regression: the only automated check today, and exactly what CI runs
-python tools/rv32i_check/run_all.py        # all suites; exit 0 = PASS
+python tools/rv32i_check/run_all.py        # all suites; exit 0 = PASS (7 suites incl. M, Zicsr, Zbb, custom-0, memory/RVVI)
 python tools/rv32i_check/tests_isa.py      # one test per instruction, plus corner tests
 python tools/rv32i_check/tests_hazard.py   # directed hazard/control tests + 300 random programs
 $env:RV_PREFIX = "riscv-none-elf-"         # only if the binutils prefix is not auto-detected
 
 # Golden-model unit tests (needs gcc and make)
-make -C model/c test                       # npu_ref, Task 10
+make -C model/c test                       # npu_ref (Task 10) and rv_iss (Task 12)
+make -C model/c xcheck                     # rv_iss vs the Python RefISS on every rv32i_check program (run run_all.py first)
 
 # Finish a task: regression -> commit -> rebase on the teammate's work -> regression -> push
 .\tools\finish_task.ps1 -Message "feat(core): M extension"
@@ -184,13 +185,13 @@ This is a small design *inspired by* CoralNPU (`google-coral/coralnpu`, commit `
 - Before creating or editing a plan, spec or report, load the documentation skill and `superpowers:writing-plans` (when installed).
 - Plans go in `docs/superpowers/plans/YYYY-MM-DD-<name>.md`. Block notes go in `docs/<block>.md` (for example `docs/mac_engine.md`).
 
-## 10. Gotchas (as of 2026-10-17; update this list when it changes)
+## 10. Gotchas (as of 2026-10-20; update this list when it changes)
 
 - `sim/`, `tb/`, `sw/`, `power/` and `model/py` contain only READMEs. Nothing there runs yet.
-- `model/c` holds `npu_ref` (Task 10, done 2026-10-17): `make -C model/c test` is green. One open item remains: the precedence of `ILLEGAL` over `K = 0` (code: `ILLEGAL` wins; spec §6.3 says "K = 0 (any op)"). Bảo and Tấn decide and record it in the spec; RTL (Task 11) must follow. `rv_iss.c` does not exist yet.
+- `model/c` holds `npu_ref` (Task 10, done 2026-10-17): `make -C model/c test` is green. One open item remains: the precedence of `ILLEGAL` over `K = 0` (code: `ILLEGAL` wins; spec §6.3 says "K = 0 (any op)"). Bảo and Tấn decide and record it in the spec; RTL (Task 11) must follow. `rv_iss.c` exists (Task 12, done 2026-10-20).
 - QuestaSim 10.7c runs UVM, `randomize`, `covergroup` and DPI-C (Task 0, 2026-10-17; `docs/smoke/results.md`). Start it with `C:\questasim64_10.7c\win64` on PATH; use `-voptargs=+acc` whenever a VCD or waveform needs inner scopes. A DPI function cannot return `bit [31:0]` (use `int unsigned` or an output argument). Verilator is not installed on Bảo's machine; S4 (Verilator ICG) was skipped on 2026-10-18, so lint and the `icg_cell` pragma under Verilator are untested. xsim is a verified fallback.
-- `tools/rv32i_check` compiles only `rtl/core/**/*.v` (`iverilog -g2012`). A new core file named `.sv`, or one that imports `npu_pkg`, is not picked up until `run.py` is updated ([support]).
-- The harness memory model is still Senior Project 1's: 256-word IMEM and DMEM, with `program.hex` in the harness folder. It moves to the spec memory map in Task 8 (`MEMMAP="spec"`).
+- `tools/rv32i_check` builds `rtl/core/**/*.v` plus an explicit list in `run.py` (`core_tb_top.sv`, `core_tb_dtcm.sv`, `npu_stub.sv`, `rtl/mem/itcm.sv`) with `iverilog -g2012`. A new `.sv` file, or one that imports `npu_pkg`, is not picked up until that list is updated ([support]).
+- Since Task 8 the harness runs the core on the spec memory map (ITCM 16 KB, DTCM 64 KB at `0x0001_0000`, SIM MMIO) in `rtl/top/core_tb_top.sv`; the DTCM is a port-A stand-in (`core_tb_dtcm.sv`) until Bảo's `dtcm_dp` exists. Every `compare()` also checks the whole RVVI retire trace against `RefISS`. `rtl/fpga/RISC_V_Fixed_Impl_Top.v` (parked) instantiates the old core ports and no longer matches `RISC_V_Top`.
 - `fence`, `ecall`, `ebreak` and unknown encodings execute as NOP until decision W2-1 is recorded (`docs/core_isa.md` §4).
 - The core uses active-high `reset`, while the engine interface (spec §7.1) uses `rst_n`. Change neither without a team decision at `npu_top`.
 - The path of `npu_pkg.sv` differs between documents: spec §12 says `rtl/`, Phase 1 Task 2 says `rtl/top/`. Settle it at Task 2 and fix the other document.

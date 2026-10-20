@@ -1,3 +1,5 @@
+`timescale 1ns / 1ps
+
 // Core-only test top (plan Task 8): core + ITCM + DTCM + SIM MMIO + engine stub.
 // Simulation only: the SIM MMIO prints to the log and the retire trace goes to a file.
 //
@@ -21,7 +23,10 @@ module core_tb_top (
     localparam logic [31:0] SIM_PUTC = 32'h0002_0004;
 
     // ---- core ports
-    logic [31:0] imem_addr, imem_rdata;
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [31:0] imem_addr;                 // bits 1:0 are not used by the ITCM
+    /* verilator lint_on UNUSEDSIGNAL */
+    logic [31:0] imem_rdata;
     logic        dmem_re;
     logic [3:0]  dmem_we;
     logic [31:0] dmem_addr, dmem_wdata, dmem_rdata;
@@ -33,9 +38,11 @@ module core_tb_top (
     logic [31:0] cmd_addr, cmd_k, rd_data;
     logic [3:0]  rd_idx;
 
-    // legacy observation outputs of the core (unused here)
+    // legacy observation outputs of the core (kept for the parked FPGA wrapper; unused here)
+    /* verilator lint_off UNUSEDSIGNAL */
     logic [31:0] obs_if_id, obs_pc_if_id, obs_pc_id_ex, obs_pc_ex_mem, obs_pc_mem_wb, obs_alu, obs_wb;
     logic        obs_jump;
+    /* verilator lint_on UNUSEDSIGNAL */
 
 `ifdef RVVI_TRACE
     logic        rvvi_valid, rvvi_trap;
@@ -66,7 +73,7 @@ module core_tb_top (
 `endif
     );
 
-    itcm u_itcm (.addr(imem_addr), .rdata(imem_rdata));
+    itcm u_itcm (.addr(imem_addr[31:2]), .rdata(imem_rdata));
 
     // ---- data bus decode
     logic sel_dtcm, dtcm_read_sel_q;

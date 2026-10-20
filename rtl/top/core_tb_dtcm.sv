@@ -1,3 +1,5 @@
+`timescale 1ns / 1ps
+
 // Stand-in for Track B's dtcm_dp, port A only (plan Task 8). It lets the core be tested before
 // dtcm_dp exists and is replaced by an instance of dtcm_dp in core_tb_top once Track B delivers
 // it. 64 KB as 16384 words, 32-bit read/write with byte enables, 1-cycle read latency
