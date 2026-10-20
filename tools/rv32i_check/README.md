@@ -60,7 +60,10 @@ reset, and bits 11..8 are write-1-to-clear (spec 6.4). The same behaviour is
 modelled in `RefISS` and (from plan Task 6) in the RTL testbench stub.
 
 ## Notes
-- The Senior Project 1 DFS coupling (`workload_monitor`, `cpu_en`) is removed; the
-  harness builds `rtl/core` with no stub.
-- `rndgen.py` is the random-program generator for `tests_m.py` and `tests_zbb.py`.
+- The Senior Project 1 DFS coupling (`workload_monitor`, `cpu_en`) is removed. The harness builds
+  `rtl/core` with `rtl/top/core_tb_top.sv` (ITCM, DTCM stand-in, SIM MMIO, engine stub `npu_stub.sv`).
+- `rndgen.py` is the random-program generator for `tests_hazard.py`, `tests_m.py`, `tests_zbb.py` and `tests_custom.py`.
+- `compare()` checks registers, the first 1024 DTCM words, the engine command log, the engine-stub CSRs
+  (`npu_err`, `npu_busy_cyc`) and the whole RVVI retire trace, and requires the RTL to have retired
+  the program's `end: j end`.
 - This is a quick check, not the UVM environment in the spec (`tb/uvm/core_env`).

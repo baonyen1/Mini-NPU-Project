@@ -78,6 +78,22 @@ results["rvvi_order_selftest"] = selftest
 if not selftest: fails.append("rvvi_order_selftest")
 print(f"[{'PASS' if selftest else 'FAIL'}] rvvi_order_selftest (the order checker flags a gap, a repeat and a wrong start)")
 
+# ---- harness self-tests: compare() must not pass an RTL that never finishes the program -----------
+# (found by the independent review: only min(len(rtl), len(ref)) records were compared, so a deadlock
+# on a trailing READ_RESULT x0 passed). Each case is a program the RTL cannot finish, or one it can.
+DEAD_RR = " li x3,5\n li x4,7\n .insn r 0x0B,3,0,x0,x3,x0\n"          # READ_RESULT x0 with rd_ready never high
+DEAD_CSR = " li x3,5\n li x5,0x55\n .insn r 0x0B,3,0,x0,x3,x0\n csrw 0x7c1,x5\n"
+hs = {
+ "harness_detects_deadlock_on_read_result": (DEAD_RR, ("+STUB_RDREADY=0",), True),
+ "harness_detects_deadlock_before_csr_write": (DEAD_CSR, ("+STUB_RDREADY=0",), True),
+ "harness_no_false_alarm_when_engine_ready": (DEAD_RR, (), False),
+}
+for name, (body, pa, must_fail) in hs.items():
+    d = compare(".text\n" + body + E, name, steps=100, cycles=400, plusargs=pa, quiet=True)
+    ok = (any("never reached the end" in x for x in d)) if must_fail else not d
+    print(f"[{'PASS' if ok else 'FAIL'}] {name} ({'diffs=' + str(len(d))})")
+    if record(name, [] if ok else ["harness verdict wrong: " + str(d[:2])]): fails.append(name)
+
 SLOW = ("+STUB_READY=0000000000000001", "+STUB_RDREADY=0000000000000001")
 LDW = ".insn r 0x0B,0,0,x0,x1,x2\n"
 RR = ".insn r 0x0B,3,0,x20,x3,x0\n"

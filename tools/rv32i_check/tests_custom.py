@@ -55,6 +55,12 @@ T.update({
  "mem_stall_stale_operand_push": (PRE + " li x6,0x21\n addi x7,x0,9\n " + LDW.format(a="x1", b="x2") + " add x8,x7,x7\n sub x9,x7,x6\n", SLOW_CMD),
  # a CSR instruction held in EX behind a waiting READ_RESULT must write once and return the OLD value
  "csr_write_once_under_mem_stall": (PRE + " li x5,0x0F\n csrrw x0,0x7c1,x5\n li x6,0xF0\n " + rr("x0", "x3") + " csrrs x10,0x7c1,x6\n csrr x11,0x7c1\n", SLOW_RD),
+ # more programs pinning "a held CSR instruction writes once, and reads the old value" (ex_advance):
+ # behind a waiting push, with csrrs/csrrc, and with the immediate forms behind a waiting READ_RESULT
+ "csr_write_once_behind_push": (PRE + " li x5,0x0F\n csrrw x0,0x7c1,x5\n li x6,0xF0\n " + LDW.format(a="x1", b="x2") + " csrrs x10,0x7c1,x6\n csrr x11,0x7c1\n"
+                                " csrrc x12,0x7c1,x5\n csrr x13,0x7c1\n", SLOW_CMD),
+ "csr_imm_write_once_behind_read_result": (PRE + " csrrwi x0,0x7c1,5\n " + rr("x0", "x3") + " csrrsi x10,0x7c1,0xA\n csrr x11,0x7c1\n "
+                                           + rr("x0", "x3") + " csrrci x12,0x7c1,3\n csrr x13,0x7c1\n", SLOW_RD),
  "custom_minstret_exact": (PRE + " csrr x10,0xB02\n " + LDW.format(a="x1", b="x2") + " " + mac("x2", 0) + " " + rr("x4", "x3") + " csrr x11,0xB02\n sub x12,x11,x10\n", SLOW_RD + SLOW_CMD),
 })
 fails = []
@@ -76,6 +82,15 @@ rtl_only("store_then_load_order",
 rtl_only("read_result_x0_still_drains",
          " li x3,5\n csrr x10,0xB00\n " + rr("x0", "x3") + " " + rr("x0", "x3") + " csrr x11,0xB00\n sub x12,x11,x10\n sltiu x13,x12,16\n",
          {13: 0}, plusargs=SLOW_RD)
+# COMPUTE and READ_RESULT leave the rs2 field unused (core_isa 6.5): a load whose rd equals that field
+# must not cost a load-use stall. Block A has that "dependency" by field, block B has none; the cycle
+# counts of the two blocks must be equal (x17 = 1). Found missing by the independent review.
+def _rs2_block(ld_rd, c0, c1, d):
+    return (f" csrr x{c0},0xB00\n lw x{ld_rd},0(x1)\n .insn r 0x0B,2,0,x0,x2,x5\n .insn r 0x0B,3,0,x0,x3,x5\n"
+            f" csrr x{c1},0xB00\n sub x{d},x{c1},x{c0}\n")
+rtl_only("no_spurious_stall_compute_rr_rs2",
+         " li x1,DM+0x40\n li x2,16\n li x3,5\n sw x3,0(x1)\n" + _rs2_block(5, 10, 11, 12) + _rs2_block(6, 13, 14, 15)
+         + " sub x16,x12,x15\n seqz x17,x16\n", {17: 1})
 print(f"\nCUSTOM-0: {len(T)-len(fails)}/{len(T)} pass; FAIL={fails}")
 
 # --- random: custom-0, divides, loads, stores and branches mixed, with random ready patterns ---

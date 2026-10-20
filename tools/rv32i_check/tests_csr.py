@@ -34,6 +34,9 @@ T = {
                            " csrrw x0,0xC02,x1\n csrrw x0,0xB02,x1\n csrr x4,0xB02\n csrr x5,0xC82\n",
  "csr_result_forwarded": " li x4,DM+0x40\n csrrw x0,0x7c1,x4\n csrr x5,0x7c1\n sw x4,0(x5)\n lw x6,0(x5)\n csrr x7,0x7c1\n beq x7,x4,L\n addi x20,x0,1\nL: addi x21,x0,2\n",
  "csr_rs1_after_load": " li x5,DM+0x40\n li x6,0x77\n sw x6,0(x5)\n lw x1,0(x5)\n csrrw x2,0x7c1,x1\n csrr x3,0x7c1\n lw x4,0(x5)\n csrrs x8,0x7c1,x4\n csrr x9,0x7c1\n",
+ # nothing reads the CSR back: only the engine-side state (npu_err, npu_busy_cyc) shows the write happened
+ "csr_trailing_write_no_readback": " li x5,0x55\n csrw 0x7c1,x5\n",
+ "csr_trailing_w1c_no_readback": " li x5,0x300\n csrrw x0,0x7c0,x5\n",
  "csr_imm_not_a_register_use": " lw x1,0(x0)\n csrrwi x2,0x7c1,1\n csrrsi x3,0x7c1,2\n csrr x4,0x7c1\n",
 }
 fails = []

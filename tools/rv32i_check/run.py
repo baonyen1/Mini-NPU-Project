@@ -62,6 +62,7 @@ def sx(v, b):
 
 def assemble(src, tag, march=MARCH):
     pre = f".equ DM, {DM_BASE:#x}\n"
+    os.makedirs("build", exist_ok=True)
     with open(f"build/{tag}.S", "w") as f: f.write(pre + src)
     subprocess.run([AS, f"-march={march}", "-mabi=ilp32", "-o", f"build/{tag}.o", f"build/{tag}.S"], check=True)
     subprocess.run([OC, "-O", "binary", "-j", ".text", f"build/{tag}.o", f"build/{tag}.bin"], check=True)
@@ -290,9 +291,17 @@ def read_rvvi(path):
     if not os.path.exists(path): return []
     return [tuple(int(t, 16) for t in line.split()) for line in open(path) if line.strip()]
 
+def end_index(ref_trace):
+    """Index of the first retire of the terminating self-loop (`end: j end` = jal x0,0), or None."""
+    for i, rec in enumerate(ref_trace):
+        if rec[2] == 0x0000006F: return i
+    return None
+
 def rvvi_diffs(rtl_trace, ref_trace, cycle_dependent=False):
-    """Compare the retire traces over the instructions both sides executed. The RTL must not
-    retire fewer instructions than the program needs (the state compare covers that).
+    """Compare the retire traces over the instructions both sides executed, and require the RTL to
+    have retired the program's `end: j end` too: a core that stalls forever mid-program (for example
+    behind a READ_RESULT) leaves a trace that is a clean prefix of the model's, and registers that
+    still look right, so the prefix compare alone would pass it.
     cycle_dependent=True is for the rare test that does arithmetic on raw cycle counts: from the
     first cycle-counter read on, rd_wdata is not compared (all other fields still are)."""
     n = min(len(rtl_trace), len(ref_trace))
@@ -308,6 +317,13 @@ def rvvi_diffs(rtl_trace, ref_trace, cycle_dependent=False):
         if a != b:
             f = [f"{nm}: rtl={x:#x} ref={y:#x}" for nm, x, y in zip(names, a, b) if x != y]
             return [f"rvvi[{i}] pc={ref_trace[i][1]:#x}: " + ", ".join(f)]
+    e = end_index(ref_trace)
+    if e is None:
+        return ["program has no terminating 'end: j end': the model never reaches it (raise steps?)"]
+    if len(rtl_trace) <= e:
+        return [f"RTL never reached the end of the program: retired {len(rtl_trace)} records, "
+                f"the model needs {e + 1} (last RTL pc {rtl_trace[-1][1]:#x})" if rtl_trace else
+                f"RTL never reached the end of the program: no retire records (log missing or core dead)"]
     return []
 
 def reads_cycle_counter(insn):
@@ -327,6 +343,9 @@ def compare(src, tag, steps=600, cycles=1500, quiet=False, march=MARCH, plusargs
     for m in range(CMP_WORDS):
         if rtl[f"m{m}"] != ref.mem[m]:
             diffs.append(f"mem[{m*4:#05x}]: rtl={rtl[f'm{m}']:08x} ref={ref.mem[m]:08x}")
+    for k, want in (("npu_err", ref.npu_err), ("npu_busy_cyc", ref.npu_busy_cyc)):   # engine-stub CSRs
+        if rtl[k] != want:
+            diffs.append(f"{k}: rtl={rtl[k]:08x} ref={want:08x}")
     if rtl["_push"] != ref.cmd_log:
         diffs.append(f"cmd_log: rtl={rtl['_push']} ref={ref.cmd_log}")
     diffs += rtl["_errors"]                      # engine-stub protocol violations

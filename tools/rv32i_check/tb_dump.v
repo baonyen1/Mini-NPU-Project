@@ -1,6 +1,7 @@
 `timescale 1ns/1ps
 // Non-graded verification harness: runs core_tb_top (core + ITCM + DTCM + SIM MMIO + engine stub),
-// then dumps the architectural state to rtl_state.txt: x1..x31 and the first MEM_WORDS DTCM words.
+// then dumps the architectural state to rtl_state.txt: x1..x31, the first MEM_WORDS DTCM words
+// and the engine-stub CSR registers (npu_err, npu_busy_cyc).
 // The run ends after +CYCLES cycles, or one cycle after a SIM_CTRL PASS/FAIL write (sim_done).
 `ifndef MEM_WORDS
 `define MEM_WORDS 1024
@@ -19,6 +20,8 @@ module tb_dump;
         f = $fopen("rtl_state.txt","w");
         for (k=1;k<32;k=k+1) $fwrite(f,"x%0d %08x\n",k,dut.u_core.DECODE_STAGE.REGFILE.regs[k]);
         for (k=0;k<`MEM_WORDS;k=k+1) $fwrite(f,"m%0d %08x\n",k,dut.u_dtcm.mem[k]);
+        $fwrite(f,"npu_err %08x\n",dut.u_npu.err_q);               // engine-stub CSR state: a CSR write that
+        $fwrite(f,"npu_busy_cyc %08x\n",dut.u_npu.busy_cyc_q);     // nothing reads back is still compared
         $fclose(f);
       end
     end
