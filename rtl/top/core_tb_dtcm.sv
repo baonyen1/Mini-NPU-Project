@@ -23,7 +23,9 @@ module core_tb_dtcm #(
         if ($value$plusargs("DTCM=%s", hex_file)) $readmemh(hex_file, mem);
     end
 
-    always_ff @(posedge clk) begin
+    // Plain `always`, not `always_ff`: `mem` and `rdata` are also written by the `initial` block above
+    // (backdoor load), which IEEE 1800 section 9.2.2.4 does not allow for an always_ff variable.
+    always @(posedge clk) begin
         for (int b = 0; b < 4; b++)
             if (we[b]) mem[addr][8*b +: 8] <= wdata[8*b +: 8];
         if (re) rdata <= mem[addr];      // a read in the cycle of a write returns the old word
