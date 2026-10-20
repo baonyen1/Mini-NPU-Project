@@ -1,5 +1,5 @@
 """Zbb and Zifencei tests (plan Task 7): RTL vs RefISS."""
-from run import compare
+from run import compare, check_rtl
 from rndgen import rnd_prog
 import os, random, json
 os.makedirs("build", exist_ok=True)
@@ -37,6 +37,8 @@ T = {
  "zbb_x0_dest": " li x1,0x1234\n clz x0,x1\n rev8 x0,x1\n add x2,x0,x1\n andn x0,x1,x1\n",
  "zbb_dest_is_source": " li x1,0x00123400\n clz x1,x1\n li x2,0x80\n sext.b x2,x2\n li x3,0xFF\n rori x3,x3,4\n",
  "fence_i_in_loop": " li x1,3\nL: addi x1,x1,-1\n fence.i\n bne x1,x0,L\n addi x2,x1,7\n",
+ # pack rd,rs1,rs2 (rs2 != x0) shares zext.h's encoding space but is not Zbb: it must execute as a NOP
+ "zbb_pack_not_decoded": " li x1,0x12345678\n li x2,0x0000ABCD\n li x5,0x55\n .insn r 0x33,4,0x04,x5,x1,x2\n zext.h x6,x1\n",
  "fence_i_dependent_chain": " li x1,1\n fence.i\n fence.i\n addi x1,x1,1\n fence.i\n add x1,x1,x1\n",
 }
 for op in ZBB_UN:
@@ -45,6 +47,11 @@ for op in ZBB_UN:
 fails = []
 for k, v in T.items():
     if compare(".text\n" + v + E, k, steps=400, cycles=1200): fails.append(k)
+# timing property of fence.i, checked on the RTL only: it redirects from EX like a taken jump,
+# so two bubbles separate the instructions around it (csrr..csrr = 4 cycles instead of 2).
+if check_rtl(".text\n csrr x1,0xB00\n fence.i\n csrr x2,0xB00\n sub x3,x2,x1\n" + E, "fence_i_flush_penalty", {3: 4}):
+    fails.append("fence_i_flush_penalty")
+T["fence_i_flush_penalty"] = None
 print(f"\nZBB / ZIFENCEI DIRECTED: {len(T)-len(fails)}/{len(T)} pass; FAIL={fails}")
 
 N = 300

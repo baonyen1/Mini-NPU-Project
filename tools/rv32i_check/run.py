@@ -294,5 +294,17 @@ def compare(src, tag, steps=600, cycles=1500, quiet=False, march=MARCH, plusargs
         for d in diffs[:8]: print("       ", d)
     return diffs
 
+def check_rtl(src, tag, expect, cycles=1500, quiet=False, march=MARCH, plusargs=()):
+    """RTL-only check for timing properties RefISS cannot model (it is cycle-free).
+    `expect` maps register numbers to the values they must hold at the end.
+    Returns the list of differences (empty = pass)."""
+    prog = assemble(src, tag, march)
+    rtl = run_rtl(prog, cycles, plusargs)
+    diffs = [f"x{r}: rtl={rtl[f'x{r}']:08x} want={v:08x}" for r, v in expect.items() if rtl[f"x{r}"] != v]
+    if not quiet:
+        print(f"[{'PASS' if not diffs else 'FAIL'}] {tag}")
+        for d in diffs[:8]: print("       ", d)
+    return diffs
+
 if __name__ == "__main__":
     os.makedirs("build", exist_ok=True)

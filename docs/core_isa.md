@@ -8,7 +8,7 @@ Spec: `docs/superpowers/specs/2026-10-04-mini-npu-design.md` §5–§6.
 | RV32I (base, 40 instructions) | ✅ implemented, regression green | 3 |
 | M (`mul*`, `div*`, `rem*`) | ✅ implemented, regression green (2026-10-20) | 5 |
 | Zicsr + counters, `npu_status`/`npu_busy_cyc` | ✅ implemented, regression green (2026-10-20) | 6 |
-| Zifencei, Zbb | ⬜ planned | 7 |
+| Zifencei, Zbb | ✅ implemented, regression green (2026-10-20) | 7 |
 | custom-0 (LOAD_WEIGHT, LOAD_INPUT, COMPUTE, READ_RESULT) | ⬜ planned | 9 |
 
 ## 1. Implemented instructions (RV32I)
@@ -65,6 +65,22 @@ The `ALU op` column is the 4-bit `alu_operation` that `Control.v` sends to `ALU.
 - **Counters.** `mcycle` (64-bit) counts every cycle from reset. `minstret` (64-bit) counts instructions leaving WB. A `valid` bit travels with every instruction (IF/ID, ID/EX, EX/MEM, MEM/WB); bubbles (reset, flush, load-use, divider wait) carry `valid = 0` and are not counted.
 - **Exact `minstret`.** A CSR read happens in EX, when the two older instructions in MEM and WB have not retired yet. The value read is `minstret + valid(EX/MEM) + valid(MEM/WB)`, which is exactly the number of instructions older than the reader, whatever bubbles or flushes precede it. `RefISS` models it the same way, so raw `minstret` values can be compared between RTL and ISS. `mcycle` is cycle-accurate in the RTL and ideal in `RefISS`, so tests only use derived booleans of cycle reads.
 - **Provisional rulings (until W2-1 is recorded and Track B confirms section 7).** Writes to `mcycle`/`minstret` and to the read-only aliases are ignored; an unknown CSR address reads 0 and ignores writes.
+
+### 2.3 Zifencei and Zbb (Task 7)
+
+- **`fence.i`** (`MISC-MEM`, funct3 = 001) executes in EX as a jump to PC+4 (`Control` raises `FenceI`; `StageExecute_Top` sets the jump flag and forces the immediate to 4). It flushes IF/ID and ID/EX and refetches the next instruction, so two bubbles separate the instructions around it. There is no I-cache and the ITCM is read-only, so the refetch always returns the same instructions; the flush matters architecturally only for self-modifying code. `fence` (funct3 = 000) stays a NOP.
+- **Zbb** is a combinational unit (`BitManip.v`) in EX, selected by `alu_operation[5] = 1`; the operation is `alu_operation[4:0]`:
+
+| op | name | op | name | op | name |
+|---|---|---|---|---|---|
+| 0 | `andn` | 6 | `max` | 12 | `zext.h` |
+| 1 | `orn` | 7 | `maxu` | 13 | `rol` |
+| 2 | `xnor` | 8 | `min` | 14 | `ror` (also `rori`, shamt as operand B) |
+| 3 | `clz` | 9 | `minu` | 15 | `orc.b` |
+| 4 | `ctz` | 10 | `sext.b` | 16 | `rev8` |
+| 5 | `cpop` | 11 | `sext.h` | | |
+
+- **Decode** needs more than `funct3`/`funct7` for the unary operations: `Control.v` now also receives the `rs2` field (`instruction[24:20]`). `zext.h` requires `rs2 = x0` (it is `pack rd, rs1, x0`; `pack` with another `rs2` is not Zbb and executes as a NOP). `slli` keeps `funct7 = 0000000`; `funct7 = 0110000` on funct3 001 selects `clz ctz cpop sext.b sext.h` by `rs2`.
 
 ## 3. Internal control encodings
 

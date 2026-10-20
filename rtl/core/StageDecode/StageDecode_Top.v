@@ -38,6 +38,7 @@ module StageDecode_Top(
     regfile_write_enable_ID_EX,
     writeback_mux_sel_ID_EX,
     csr_op_ID_EX,
+    fence_i_ID_EX,
     valid_ID_EX
 );
 
@@ -73,6 +74,7 @@ output datamem_write_enable_ID_EX;
 output regfile_write_enable_ID_EX;
 output [1:0] writeback_mux_sel_ID_EX;
 output [2:0] csr_op_ID_EX;
+output fence_i_ID_EX;
 output valid_ID_EX;
 
 wire [4:0] regfile_write_address;
@@ -92,6 +94,7 @@ wire [2:0] data_format;
 wire [5:0] alu_operation;
 wire [1:0] writeback_mux_sel;
 wire [2:0] csr_op;
+wire fence_i;
 
 wire [31:0] regfile_out_0;
 wire [31:0] regfile_out_1;
@@ -115,7 +118,8 @@ Controller CONTROLLER(
     .writeback_mux_sel(writeback_mux_sel),
     .regfile_write_enable(regfile_write_enable),
     .regfile_write_address(regfile_write_address),
-    .csr_op(csr_op)
+    .csr_op(csr_op),
+    .fence_i(fence_i)
 );
 
 Register_File REGFILE(
@@ -157,6 +161,7 @@ ID_EX_Reg ID_EX(
     .regfile_write_enable(regfile_write_enable),
     .writeback_mux_sel(writeback_mux_sel),
     .csr_op(csr_op),
+    .fence_i(fence_i),
     .valid(valid_IF_ID),
 
     .Instruction_address_ID_EX(Instruction_address_ID_EX),
@@ -180,6 +185,7 @@ ID_EX_Reg ID_EX(
     .regfile_write_enable_ID_EX(regfile_write_enable_ID_EX),
     .writeback_mux_sel_ID_EX(writeback_mux_sel_ID_EX),
     .csr_op_ID_EX(csr_op_ID_EX),
+    .fence_i_ID_EX(fence_i_ID_EX),
     .valid_ID_EX(valid_ID_EX)
 );
 

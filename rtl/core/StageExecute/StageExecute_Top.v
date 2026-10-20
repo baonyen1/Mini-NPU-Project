@@ -23,6 +23,7 @@ module StageExecute_Top(
     regfile_write_enable_ID_EX,
     writeback_mux_sel_ID_EX,
     csr_op_ID_EX,
+    fence_i_ID_EX,
     regfile_read_address_0_ID_EX,
     valid_ID_EX,
 
@@ -86,6 +87,7 @@ input datamem_write_enable_ID_EX;
 input regfile_write_enable_ID_EX;
 input [1:0] writeback_mux_sel_ID_EX;
 input [2:0] csr_op_ID_EX;
+input fence_i_ID_EX;
 input [4:0] regfile_read_address_0_ID_EX;
 input valid_ID_EX;
 
@@ -128,6 +130,7 @@ wire [31:0] alu_input_a;
 wire [31:0] mux_1_output;
 wire [31:0] alu_output;
 wire [31:0] ex_result;
+wire [31:0] bb_result;
 wire alu_branch_response;
 wire [31:0] return_address_EX_MEM;
 wire [31:0] return_address_MEM_WB;
@@ -248,19 +251,36 @@ CSR_Unit CSR(
     .npu_csr_rdata(csr_rdata)
 );
 
+// ---- Zbb: alu_operation[5] = 1, operation in [4:0] -----------------------
+wire is_bb_op = alu_operation_ID_EX[5];
+
+BitManip BITMANIP(
+    .a(alu_input_a),
+    .b(mux_1_output),
+    .op(alu_operation_ID_EX[4:0]),
+    .result(bb_result)
+);
+
 assign ex_result = csr_is_op ? csr_value :
+                   is_bb_op  ? bb_result :
                    is_mul_op ? mul_result :
                    is_div_op ? div_result :
                    alu_output;
 
+// fence.i is a jump to PC+4: it flushes the younger instructions and refetches
+// them (there is no I-cache; spec 5). It reuses the PC-relative jump path with
+// the immediate forced to 4.
+wire [31:0] bru_immediate = fence_i_ID_EX ? 32'd4 : immediate_ID_EX;
+wire bru_jump_flag = jump_flag_ID_EX | fence_i_ID_EX;
+
 BRU BRANCH_RESOLUTION_UNIT(
     .Instruction_address_ID_EX(Instruction_address_ID_EX),
     .regfile_out_0_ID_EX(fw_mux_0_output),
-    .immediate_ID_EX(immediate_ID_EX),
+    .immediate_ID_EX(bru_immediate),
     .jump_target_mux_sel_ID_EX(jump_target_mux_sel_ID_EX),
     .alu_branch_ID_EX(alu_branch_ID_EX),
     .alu_branch_response(alu_branch_response),
-    .jump_flag_ID_EX(jump_flag_ID_EX),
+    .jump_flag_ID_EX(bru_jump_flag),
     .jump_branch_signal(jump_branch_signal),
     .flush_signal(flush_signal),
     .jump_branch_destination(jump_branch_destination)

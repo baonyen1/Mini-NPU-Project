@@ -57,6 +57,7 @@ wire datamem_write_enable_ID_EX;
 wire regfile_write_enable_ID_EX;
 wire [1:0] writeback_mux_sel_ID_EX;
 wire [2:0] csr_op_ID_EX;
+wire fence_i_ID_EX;
 wire valid_IF_ID, valid_ID_EX, valid_EX_MEM, valid_MEM_WB;
 
 wire [31:0] datamem_wr_data_EX_MEM;
@@ -165,6 +166,7 @@ StageDecode_Top DECODE_STAGE(
     .regfile_write_enable_ID_EX(regfile_write_enable_ID_EX),
     .writeback_mux_sel_ID_EX(writeback_mux_sel_ID_EX),
     .csr_op_ID_EX(csr_op_ID_EX),
+    .fence_i_ID_EX(fence_i_ID_EX),
     .valid_ID_EX(valid_ID_EX)
 );
 
@@ -190,6 +192,7 @@ StageExecute_Top EXECUTE_STAGE(
     .regfile_write_enable_ID_EX(regfile_write_enable_ID_EX),
     .writeback_mux_sel_ID_EX(writeback_mux_sel_ID_EX),
     .csr_op_ID_EX(csr_op_ID_EX),
+    .fence_i_ID_EX(fence_i_ID_EX),
     .regfile_read_address_0_ID_EX(regfile_read_address_0_ID_EX),
     .valid_ID_EX(valid_ID_EX),
 

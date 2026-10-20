@@ -29,6 +29,7 @@ module ID_EX_Reg(
     regfile_write_enable,
     writeback_mux_sel,
     csr_op,
+    fence_i,
     valid,
 
     // data to Execute
@@ -54,6 +55,7 @@ module ID_EX_Reg(
     regfile_write_enable_ID_EX,
     writeback_mux_sel_ID_EX,
     csr_op_ID_EX,
+    fence_i_ID_EX,
     valid_ID_EX
 );
 
@@ -81,6 +83,7 @@ input datamem_write_enable;
 input regfile_write_enable;
 input [1:0] writeback_mux_sel;
 input [2:0] csr_op;
+input fence_i;
 input valid;
 
 output reg [31:0] Instruction_address_ID_EX;
@@ -105,6 +108,7 @@ output reg datamem_write_enable_ID_EX;
 output reg regfile_write_enable_ID_EX;
 output reg [1:0] writeback_mux_sel_ID_EX;
 output reg [2:0] csr_op_ID_EX;
+output reg fence_i_ID_EX;
 output reg valid_ID_EX;
 
 always @(posedge clk) begin
@@ -131,6 +135,7 @@ always @(posedge clk) begin
         regfile_write_enable_ID_EX  <= 1'b0;
         writeback_mux_sel_ID_EX     <= 2'b00;
         csr_op_ID_EX                <= 3'b000;
+        fence_i_ID_EX               <= 1'b0;
         valid_ID_EX                 <= 1'b0;
     end
     else if (flush) begin
@@ -156,6 +161,7 @@ always @(posedge clk) begin
         regfile_write_enable_ID_EX  <= 1'b0;
         writeback_mux_sel_ID_EX     <= 2'b00;
         csr_op_ID_EX                <= 3'b000;
+        fence_i_ID_EX               <= 1'b0;
         valid_ID_EX                 <= 1'b0;
     end
     else if (!stall) begin
@@ -181,6 +187,7 @@ always @(posedge clk) begin
         regfile_write_enable_ID_EX  <= regfile_write_enable;
         writeback_mux_sel_ID_EX     <= writeback_mux_sel;
         csr_op_ID_EX                <= csr_op;
+        fence_i_ID_EX               <= fence_i;
         valid_ID_EX                 <= valid;
     end
 end

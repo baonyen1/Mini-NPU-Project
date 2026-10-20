@@ -6,6 +6,4 @@
 # 2026-10-20: plan Task 4 added the tests for M, Zicsr, Zbb/Zifencei and custom-0
 # before the RTL exists (test first). Each line below is deleted by the commit
 # that implements its feature.
-zbb_*                                # 2026-10-20: Zbb / fence.i not implemented yet (plan Task 7)
-randzbb_*                            # 2026-10-20: Zbb not implemented yet (plan Task 7)
 custom_*                             # 2026-10-20: custom-0 push and engine stub not implemented yet (plan Task 9)

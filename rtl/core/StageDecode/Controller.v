@@ -18,7 +18,8 @@ module Controller(
     writeback_mux_sel,
     regfile_write_enable,
     regfile_write_address,
-    csr_op
+    csr_op,
+    fence_i
 );
 
 input [31:0] Instruction_IF_ID;
@@ -40,6 +41,7 @@ output [1:0] writeback_mux_sel;
 output regfile_write_enable;
 output [4:0] regfile_write_address;
 output [2:0] csr_op;
+output fence_i;
 
 wire [6:0] opcode;
 wire [2:0] fun3;
@@ -59,6 +61,7 @@ Control_Unit CONTROL_LOGIC(
     .Opcode(opcode),
     .fun3(fun3),
     .fun7(fun7),
+    .rs2_field(regfile_read_address_1),
     .Branch(alu_branch),
     .Memread(datamem_read_enable),
     .alu_operation(alu_operation),
@@ -71,7 +74,8 @@ Control_Unit CONTROL_LOGIC(
     .JumpTargetSel(jump_target_mux_sel),
     .DataFormat(data_format),
     .WB_sel(writeback_mux_sel),
-    .csr_op(csr_op)
+    .csr_op(csr_op),
+    .FenceI(fence_i)
 );
 
 ImmGenerator IMMEDIATE_GENERATOR(
