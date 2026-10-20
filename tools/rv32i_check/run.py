@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
 """Non-graded verification harness: assemble a test, run RTL (iverilog) and a
-reference ISS (RefISS), then compare x1..x31, data memory and, for custom-0,
-the engine command log.
+reference ISS (RefISS), then compare x1..x31, data memory, the engine command
+log and the whole RVVI retire trace.
 
-RefISS models RV32IM + Zicsr + Zifencei + Zbb + custom-0 (stub mode). The
-memory map is selected with MEMMAP ("sp1" or "spec", environment variable):
-  sp1  : Harvard, 256-word IMEM and DMEM addressed by addr[9:0] (aliased), the
-         Senior Project 1 model the core still has before plan Task 8.
-  spec : spec 4.1: ITCM 16 KB at 0, DTCM 64 KB at 0x0001_0000, SIM_CTRL
-         0x0002_0000, SIM_PUTC 0x0002_0004.
-Test sources use the assembler symbol DM as the data base so that one source
-runs under both maps (DM = 0 for sp1, 0x10000 for spec)."""
+RefISS models RV32IM + Zicsr + Zifencei + Zbb + custom-0 (stub mode) with the
+memory map of spec 4.1: ITCM 16 KB at 0 (instruction fetch only), DTCM 64 KB at
+0x0001_0000, SIM_CTRL 0x0002_0000, SIM_PUTC 0x0002_0004; any other data address
+reads 0 and ignores writes (decision W2-1 is still open). The RTL under test is
+rtl/top/core_tb_top.sv (core + ITCM + DTCM + SIM MMIO + engine stub).
+
+Test sources use the assembler symbol DM (0x0001_0000) as the data base.
+
+RVVI record (one per retired instruction), the same fields as spec 5 and the
+Phase 2 plan: order pc insn rd rd_wdata mem_addr mem_wdata mem_wmask trap
+  rd/rd_wdata : destination index and value written, 0/0 when nothing (or x0) is written
+  mem_addr    : effective address of a load or store, else 0
+  mem_wdata   : the byte-lane-aligned word driven on the write bus (sb: byte replicated,
+                sh: half replicated, sw: the word); 0 for loads and non-memory instructions
+  mem_wmask   : the byte enables of the write; 0 for loads and non-memory instructions
+  trap        : 0 until decision W2-1 defines traps"""
 import subprocess, sys, os, struct, random, shutil, glob
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -18,10 +26,8 @@ CORE = os.path.normpath(os.path.join(HERE, "..", "..", "rtl", "core"))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 os.chdir(HERE)                      # the memories read their hex file from cwd
 
-MEMMAP = os.environ.get("MEMMAP", "sp1")
-assert MEMMAP in ("sp1", "spec"), "MEMMAP must be sp1 or spec"
-DM_BASE = {"sp1": 0x0, "spec": 0x10000}[MEMMAP]
-CMP_WORDS = {"sp1": 256, "spec": 1024}[MEMMAP]   # data words compared RTL vs ISS
+DM_BASE = 0x10000                   # DTCM base: the assembler symbol DM in test sources
+CMP_WORDS = 1024                    # data words (from DM) compared RTL vs ISS
 MARCH = "rv32im_zicsr_zifencei_zbb"
 
 def _find_prefix():
@@ -39,11 +45,13 @@ SIM_CTRL = 0x20000
 SIM_PUTC = 0x20004
 
 def build_sim():
-    """Compile the DUT with iverilog (core only under sp1)."""
+    """Compile the DUT with iverilog: the core, core_tb_top (ITCM, DTCM stand-in, SIM MMIO,
+    engine stub) and tb_dump.v. RVVI_TRACE enables the retire-trace ports."""
     os.makedirs("build", exist_ok=True)
     srcs = glob.glob(os.path.join(CORE, "**", "*.v"), recursive=True)
-    srcs += [os.path.join(ROOT, "rtl", "top", "npu_stub.sv")]
-    cmd = ["iverilog", "-g2012", f"-DMEM_WORDS={CMP_WORDS}", "-o", "build/sim.vvp", "tb_dump.v"] + srcs
+    srcs += [os.path.join(ROOT, "rtl", "top", f) for f in ("core_tb_top.sv", "core_tb_dtcm.sv", "npu_stub.sv")]
+    srcs += [os.path.join(ROOT, "rtl", "mem", "itcm.sv")]
+    cmd = ["iverilog", "-g2012", "-DRVVI_TRACE", f"-DMEM_WORDS={CMP_WORDS}", "-o", "build/sim.vvp", "tb_dump.v"] + srcs
     subprocess.run(cmd, check=True)
 
 _built = False
@@ -118,12 +126,12 @@ class RefISS:
     """Cycle-free reference model. mcycle is modelled as the instruction count
     (ideal 1 CPI), so tests must only use derived booleans of cycle reads.
     minstret is exact: the number of instructions executed before the reader."""
-    def __init__(self, prog, memmap=None):
-        self.memmap = memmap or MEMMAP
+    def __init__(self, prog):
         self.x = [0]*32; self.pc = 0; self.prog = prog
-        self.imem_words = 256 if self.memmap == "sp1" else 4096
-        self.mem = [0] * (256 if self.memmap == "sp1" else 16384)
+        self.imem_words = 4096       # ITCM 16 KB
+        self.mem = [0] * 16384       # DTCM 64 KB
         self.cycle = 0; self.instret = 0
+        self.trace = []              # RVVI records, one per executed instruction
         self.cmd_log = []            # (op, addr, k, clr) of every custom-0 push
         self.sim_ctrl = []           # values written to SIM_CTRL (spec map)
         self.putc = []               # characters written to SIM_PUTC (spec map)
@@ -132,11 +140,9 @@ class RefISS:
         self.unsupported = set()
     # -- data memory
     def _widx(self, a):
-        if self.memmap == "sp1":
-            return (a & 0x3FF) >> 2
         if 0x10000 <= a < 0x20000:
             return (a - 0x10000) >> 2
-        return None                  # unmapped: loads read 0, stores are ignored (W2-1 open)
+        return None                  # unmapped (also ITCM as data): loads read 0, stores are ignored (W2-1 open)
     def ld(self, a, n, signed):
         i = self._widx(a)
         if i is None: return 0
@@ -146,9 +152,8 @@ class RefISS:
         else: v = w
         return sx(v, 8*n) & M32 if signed and n < 4 else v
     def st(self, a, n, v):
-        if self.memmap == "spec":
-            if a == SIM_CTRL: self.sim_ctrl.append(v & M32); return 1
-            if a == SIM_PUTC: self.putc.append(v & 0xFF); return 0
+        if a == SIM_CTRL and n == 4: self.sim_ctrl.append(v & M32); return 1    # word writes only
+        if a == SIM_PUTC: self.putc.append(v & 0xFF); return 0
         i = self._widx(a)
         if i is None: return 0
         if n == 4: self.mem[i] = v & M32; return 0
@@ -171,11 +176,8 @@ class RefISS:
         # counters and aliases are read-only for software; unknown CSRs ignore writes
     # -- one instruction
     def fetch(self):
-        if self.memmap == "sp1":
-            idx = (self.pc >> 2) & 0xFF
-        else:
-            idx = self.pc >> 2
-            if idx >= self.imem_words: return 0x13
+        idx = self.pc >> 2
+        if idx >= self.imem_words: return 0x13       # outside the ITCM: NOP (W2-1 open)
         return self.prog[idx] if idx < len(self.prog) else 0x13
     def step(self):
         """Execute one instruction; returns 1 when it wrote SIM_CTRL, else 0."""
@@ -187,6 +189,7 @@ class RefISS:
         bimm = sx((((ins >> 31) & 1) << 12) | (((ins >> 7) & 1) << 11) | (((ins >> 25) & 63) << 5) | (((ins >> 8) & 15) << 1), 13)
         jimm = sx((((ins >> 31) & 1) << 20) | (((ins >> 12) & 255) << 12) | (((ins >> 20) & 1) << 11) | (((ins >> 21) & 1023) << 1), 21)
         npc = (self.pc + 4) & M32; w = None; sim_end = 0
+        mem_addr = mem_wdata = mem_wmask = 0
         if op == 0x33:
             if f7 == 1:
                 w = muldiv(f3, a, b)
@@ -216,10 +219,15 @@ class RefISS:
         elif op == 0x03:
             ad = (a + iimm) & M32
             m = {0:(1,1),1:(2,1),2:(4,0),4:(1,0),5:(2,0)}
-            if f3 in m: w = self.ld(ad, *m[f3])
+            if f3 in m: w = self.ld(ad, *m[f3]); mem_addr = ad
         elif op == 0x23:
             ad = (a + simm) & M32
-            if f3 in (0,1,2): sim_end = self.st(ad, [1,2,4][f3], b)
+            if f3 in (0,1,2):
+                sim_end = self.st(ad, [1,2,4][f3], b)
+                mem_addr = ad
+                if f3 == 0:   mem_wdata = (b & 0xFF) * 0x01010101;   mem_wmask = 1 << (ad & 3)
+                elif f3 == 1: mem_wdata = (b & 0xFFFF) * 0x00010001; mem_wmask = 0b1100 if ad & 2 else 0b0011
+                else:         mem_wdata = b;                         mem_wmask = 0xF
         elif op == 0x63:
             c = {0:a==b,1:a!=b,4:sx(a,32)<sx(b,32),5:sx(a,32)>=sx(b,32),6:a<b,7:a>=b}.get(f3)
             if c: npc = (self.pc + bimm) & M32
@@ -241,7 +249,9 @@ class RefISS:
             elif f3 == 3: w = a & 0xF                                 # READ_RESULT returns idx
             else:         self.cmd_log.append((3, a, b, 0))           # reserved funct3 -> ILLEGAL
         # op 0x0F (fence, fence.i), ecall/ebreak and unknown encodings execute as NOP
-        if w is not None and rd: self.x[rd] = w & M32
+        rec_rd = rec_val = 0
+        if w is not None and rd: self.x[rd] = w & M32; rec_rd = rd; rec_val = w & M32
+        self.trace.append((self.instret, self.pc, ins, rec_rd, rec_val, mem_addr, mem_wdata, mem_wmask, 0))
         self.pc = npc
         self.cycle += 1; self.instret += 1
         return sim_end
@@ -255,13 +265,15 @@ def run_iss(prog, steps):
         s.step()
     return s
 
-def run_rtl(prog, cycles, plusargs=()):
+def run_rtl(prog, cycles, plusargs=(), tag="rtl"):
     global _built
     if not _built:
         build_sim(); _built = True
     with open("program.hex", "w") as f:
         for wd in prog: f.write(f"{wd:08x}\n")
-    cp = subprocess.run(["vvp", "-n", "build/sim.vvp", f"+CYCLES={cycles}"] + list(plusargs),
+    if os.path.exists("rtl_state.txt"): os.remove("rtl_state.txt")     # never read a stale dump
+    cp = subprocess.run(["vvp", "-n", "build/sim.vvp", f"+CYCLES={cycles}", "+ITCM=program.hex",
+                         f"+RVVI_LOG=build/{tag}.rvvi"] + list(plusargs),
                         check=True, capture_output=True, text=True)
     st = {}
     for line in open("rtl_state.txt"):
@@ -270,14 +282,44 @@ def run_rtl(prog, cycles, plusargs=()):
     st["_push"] = [tuple(int(t, 16) for t in l.split()[1:5])
                    for l in cp.stdout.splitlines() if l.startswith("PUSH ")]
     st["_errors"] = [l for l in cp.stdout.splitlines() if l.startswith("STUB_ERROR")]
+    st["_rvvi"] = read_rvvi(f"build/{tag}.rvvi")
     return st
 
-def compare(src, tag, steps=600, cycles=1500, quiet=False, march=MARCH, plusargs=()):
+def read_rvvi(path):
+    """RVVI log written by core_tb_top: one line per retire, hex fields in record order."""
+    if not os.path.exists(path): return []
+    return [tuple(int(t, 16) for t in line.split()) for line in open(path) if line.strip()]
+
+def rvvi_diffs(rtl_trace, ref_trace, cycle_dependent=False):
+    """Compare the retire traces over the instructions both sides executed. The RTL must not
+    retire fewer instructions than the program needs (the state compare covers that).
+    cycle_dependent=True is for the rare test that does arithmetic on raw cycle counts: from the
+    first cycle-counter read on, rd_wdata is not compared (all other fields still are)."""
+    n = min(len(rtl_trace), len(ref_trace))
+    names = ("order", "pc", "insn", "rd", "rd_wdata", "mem_addr", "mem_wdata", "mem_wmask", "trap")
+    tainted = False
+    for i in range(n):
+        a, b = list(rtl_trace[i]), list(ref_trace[i])
+        if reads_cycle_counter(b[2]):       # mcycle/cycle are cycle-accurate in the RTL, ideal in RefISS:
+            tainted = tainted or cycle_dependent
+            a[4] = b[4] = 0                 # their value is masked, every other field is still compared
+        if tainted:
+            a[4] = b[4] = 0
+        if a != b:
+            f = [f"{nm}: rtl={x:#x} ref={y:#x}" for nm, x, y in zip(names, a, b) if x != y]
+            return [f"rvvi[{i}] pc={ref_trace[i][1]:#x}: " + ", ".join(f)]
+    return []
+
+def reads_cycle_counter(insn):
+    """True for a Zicsr instruction addressing mcycle/mcycleh/cycle/cycleh."""
+    return (insn & 0x7F) == 0x73 and ((insn >> 12) & 7) not in (0, 4) and (insn >> 20) in (0xB00, 0xB80, 0xC00, 0xC80)
+
+def compare(src, tag, steps=600, cycles=1500, quiet=False, march=MARCH, plusargs=(), cycle_dependent=False):
     """Program must end in 'end: j end'. ISS steps / RTL cycles just need to
     be large enough to reach it. Returns the list of differences (empty = pass)."""
     prog = assemble(src, tag, march)
     ref = run_iss(prog, steps)
-    rtl = run_rtl(prog, cycles, plusargs)
+    rtl = run_rtl(prog, cycles, plusargs, tag)
     diffs = []
     for r in range(1, 32):
         if rtl[f"x{r}"] != ref.x[r]:
@@ -288,9 +330,10 @@ def compare(src, tag, steps=600, cycles=1500, quiet=False, march=MARCH, plusargs
     if rtl["_push"] != ref.cmd_log:
         diffs.append(f"cmd_log: rtl={rtl['_push']} ref={ref.cmd_log}")
     diffs += rtl["_errors"]                      # engine-stub protocol violations
+    diffs += rvvi_diffs(rtl["_rvvi"], ref.trace, cycle_dependent)  # every retired instruction, in order
     with open(f"build/{tag}.ref.txt", "w") as f:      # consumed by model/c rv_iss tests
         for r in range(1, 32): f.write(f"x{r} {ref.x[r]:08x}\n")
-        f.write(f"steps {steps}\nmemmap {MEMMAP}\n")
+        f.write(f"steps {steps}\nmemmap spec\n")
     if not quiet:
         print(f"[{'PASS' if not diffs else 'FAIL'}] {tag}")
         for d in diffs[:8]: print("       ", d)
@@ -302,7 +345,7 @@ def check_rtl(src, tag, expect, cycles=1500, quiet=False, march=MARCH, plusargs=
     `stdout_has` lists lines (prefix match) the simulation must have printed.
     Returns the list of differences (empty = pass)."""
     prog = assemble(src, tag, march)
-    rtl = run_rtl(prog, cycles, plusargs)
+    rtl = run_rtl(prog, cycles, plusargs, tag)
     diffs = [f"x{r}: rtl={rtl[f'x{r}']:08x} want={v:08x}" for r, v in expect.items() if rtl[f"x{r}"] != v]
     diffs += rtl["_errors"]
     for want in stdout_has:

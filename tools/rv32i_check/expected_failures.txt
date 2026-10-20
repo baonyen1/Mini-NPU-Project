@@ -6,3 +6,4 @@
 # 2026-10-20: plan Task 4 added the tests for M, Zicsr, Zbb/Zifencei and custom-0
 # before the RTL exists (test first). Each line below is deleted by the commit
 # that implements its feature.
+# 2026-10-20: all of Tasks 4-9 are implemented; the list is empty again.

@@ -24,6 +24,14 @@ module StageMemory_Top(
     regfile_write_address_EX_MEM,
     valid_EX_MEM,
     custom_ctl_EX_MEM,
+    insn_EX_MEM,
+
+    // data memory bus (DTCM / SIM MMIO decode is outside the core)
+    dmem_re,
+    dmem_we,
+    dmem_addr,
+    dmem_wdata,
+    dmem_rdata,
 
     // engine command / result port (spec 7.1)
     cmd_valid,
@@ -47,7 +55,11 @@ module StageMemory_Top(
     writeback_mux_sel_MEM_WB,
     regfile_write_enable_MEM_WB,
     regfile_write_address_MEM_WB,
-    valid_MEM_WB
+    valid_MEM_WB,
+    insn_MEM_WB,
+    mem_addr_MEM_WB,
+    mem_wdata_MEM_WB,
+    mem_wmask_MEM_WB
 );
 
 input clk, reset;
@@ -63,6 +75,13 @@ input regfile_write_enable_EX_MEM;
 input [4:0] regfile_write_address_EX_MEM;
 input valid_EX_MEM;
 input [4:0] custom_ctl_EX_MEM;     // [4] custom-0, [3] clr (funct7[0]), [2:0] funct3
+input [31:0] insn_EX_MEM;
+
+output dmem_re;
+output [3:0] dmem_we;
+output [31:0] dmem_addr;
+output [31:0] dmem_wdata;
+input [31:0] dmem_rdata;
 
 output cmd_valid;
 input cmd_ready;
@@ -84,6 +103,10 @@ output [1:0] writeback_mux_sel_MEM_WB;
 output regfile_write_enable_MEM_WB;
 output [4:0] regfile_write_address_MEM_WB;
 output valid_MEM_WB;
+output [31:0] insn_MEM_WB;
+output [31:0] mem_addr_MEM_WB;
+output [31:0] mem_wdata_MEM_WB;
+output [3:0] mem_wmask_MEM_WB;
 
 wire [31:0] lsu_read_data;
 wire [31:0] rd_data_MEM_WB;
@@ -115,10 +138,21 @@ LSU LOAD_STORE_UNIT(
     .read_enable(datamem_read_enable_EX_MEM),
     .write_enable(datamem_write_enable_EX_MEM),
     .data_format(data_format_EX_MEM),
-    .address(alu_out_EX_MEM[9:0]),
+    .address(alu_out_EX_MEM),
     .write_data(datamem_wr_data_EX_MEM),
-    .read_data(lsu_read_data)
+    .read_data(lsu_read_data),
+    .dmem_re(dmem_re),
+    .dmem_we(dmem_we),
+    .dmem_addr(dmem_addr),
+    .dmem_wdata(dmem_wdata),
+    .dmem_rdata(dmem_rdata)
 );
+
+// Memory access of this instruction for the RVVI retire trace: the effective address of a load
+// or store, the lane-aligned write data and the byte enables (all 0 for other instructions).
+wire mem_access = dmem_re | (|dmem_we);
+wire [31:0] trace_mem_addr  = mem_access ? dmem_addr : 32'b0;
+wire [31:0] trace_mem_wdata = (|dmem_we) ? dmem_wdata : 32'b0;
 
 // READ_RESULT returns its data through the load-data path (writeback select 01)
 assign datamem_out_MEM_WB = rr_MEM_WB ? rd_data_MEM_WB : lsu_read_data;
@@ -136,6 +170,10 @@ MEM_WB_Reg MEM_WB(
     .rr_EX_MEM(is_rr),
     .rd_data(rd_data),
     .bubble(mem_busy),
+    .insn_EX_MEM(insn_EX_MEM),
+    .mem_addr_EX_MEM(trace_mem_addr),
+    .mem_wdata_EX_MEM(trace_mem_wdata),
+    .mem_wmask_EX_MEM(dmem_we),
 
     .Instruction_address_MEM_WB(Instruction_address_MEM_WB),
     .alu_out_MEM_WB(alu_out_MEM_WB),
@@ -144,7 +182,11 @@ MEM_WB_Reg MEM_WB(
     .regfile_write_address_MEM_WB(regfile_write_address_MEM_WB),
     .valid_MEM_WB(valid_MEM_WB),
     .rr_MEM_WB(rr_MEM_WB),
-    .rd_data_MEM_WB(rd_data_MEM_WB)
+    .rd_data_MEM_WB(rd_data_MEM_WB),
+    .insn_MEM_WB(insn_MEM_WB),
+    .mem_addr_MEM_WB(mem_addr_MEM_WB),
+    .mem_wdata_MEM_WB(mem_wdata_MEM_WB),
+    .mem_wmask_MEM_WB(mem_wmask_MEM_WB)
 );
 
 endmodule

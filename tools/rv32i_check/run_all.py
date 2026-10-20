@@ -20,6 +20,7 @@ SUITES = [
     ("Zicsr / counters",              "tests_csr.py",     "build/results_csr.json"),
     ("Zbb / Zifencei",                "tests_zbb.py",     "build/results_zbb.json"),
     ("custom-0 (engine stub)",        "tests_custom.py",  "build/results_custom.json"),
+    ("Memory map / SIM MMIO / RVVI",  "tests_mem.py",     "build/results_mem.json"),
 ]
 results = {}
 for title, script, res in SUITES:

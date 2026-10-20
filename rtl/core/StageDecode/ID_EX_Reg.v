@@ -36,6 +36,7 @@ module ID_EX_Reg(
     fence_i,
     custom_ctl,
     valid,
+    insn,
 
     // data to Execute
     Instruction_address_ID_EX,
@@ -62,7 +63,8 @@ module ID_EX_Reg(
     csr_op_ID_EX,
     fence_i_ID_EX,
     custom_ctl_ID_EX,
-    valid_ID_EX
+    valid_ID_EX,
+    insn_ID_EX
 );
 
 input clk, reset, stall, flush;
@@ -99,6 +101,7 @@ input [2:0] csr_op;
 input fence_i;
 input [4:0] custom_ctl;
 input valid;
+input [31:0] insn;
 
 output reg [31:0] Instruction_address_ID_EX;
 output reg [31:0] regfile_out_0_ID_EX;
@@ -125,6 +128,7 @@ output reg [2:0] csr_op_ID_EX;
 output reg fence_i_ID_EX;
 output reg [4:0] custom_ctl_ID_EX;
 output reg valid_ID_EX;
+output reg [31:0] insn_ID_EX;
 
 always @(posedge clk) begin
     if (reset) begin
@@ -153,6 +157,7 @@ always @(posedge clk) begin
         fence_i_ID_EX               <= 1'b0;
         custom_ctl_ID_EX            <= 5'b00000;
         valid_ID_EX                 <= 1'b0;
+        insn_ID_EX                  <= 32'h00000013;
     end
     else if (flush) begin
         Instruction_address_ID_EX <= 32'b0;
@@ -180,6 +185,7 @@ always @(posedge clk) begin
         fence_i_ID_EX               <= 1'b0;
         custom_ctl_ID_EX            <= 5'b00000;
         valid_ID_EX                 <= 1'b0;
+        insn_ID_EX                  <= 32'h00000013;
     end
     else if (stall) begin
         regfile_out_0_ID_EX       <= held_operand_0;
@@ -211,6 +217,7 @@ always @(posedge clk) begin
         fence_i_ID_EX               <= fence_i;
         custom_ctl_ID_EX            <= custom_ctl;
         valid_ID_EX                 <= valid;
+        insn_ID_EX                  <= insn;
     end
 end
 

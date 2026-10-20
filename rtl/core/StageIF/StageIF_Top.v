@@ -11,7 +11,11 @@ module StageIF_TOP (
 
     Instruction_IF_ID,
     Instruction_address_IF_ID,
-    valid_IF_ID
+    valid_IF_ID,
+
+    // instruction memory (ITCM), combinational read
+    imem_addr,
+    imem_rdata
 );
 
 input clk, reset;
@@ -23,6 +27,8 @@ input [31:0] jump_branch_destination;
 output [31:0] Instruction_IF_ID;
 output [31:0] Instruction_address_IF_ID;
 output valid_IF_ID;
+output [31:0] imem_addr;
+input [31:0] imem_rdata;
 
 wire [31:0] next_instruction_address;
 wire [31:0] Instruction_address_IF;
@@ -49,11 +55,8 @@ PCplus4 PC_ADD4(
     .toPC(pc_plus4_IF)
 );
 
-ProgramMemory PMEM(
-    .reset(reset),
-    .read_word_addr(Instruction_address_IF[9:2]),
-    .instruction_out(Instruction_IF)
-);
+assign imem_addr = Instruction_address_IF;
+assign Instruction_IF = reset ? 32'h00000013 : imem_rdata;   // NOP while in reset
 
 IF_ID_Reg IF_ID(
     .clk(clk),

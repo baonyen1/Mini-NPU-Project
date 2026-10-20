@@ -154,7 +154,7 @@ Mutation sanity check (the suite must fail when the RTL is wrong):
 | `sra` implemented as logical shift | 3 directed + 34 random seeds fail |
 | `bltu` implemented as signed compare | 2 directed + 31 random seeds fail |
 
-Memory model in the harness is still the Senior Project 1 one (1 KB IMEM, 1 KB DMEM). It moves to the spec map (ITCM 16 KB, DTCM 64 KB) in plan Task 8.
+Since plan Task 8 the harness runs the core in `rtl/top/core_tb_top.sv` on the spec memory map (ITCM 16 KB, DTCM 64 KB); see section 9.
 
 ## 6. Planned instructions: encodings (week-2 freeze)
 
@@ -280,3 +280,37 @@ Open points to settle with Track B before both sign §7.1, because they fix what
 ## 8. `cpu_en` record
 
 `cpu_en` was the Senior Project 1 DFS clock-enable. It was **removed** in Task 1 (`69cd798`, 2026-10-05), not tied to `1'b1` at the top. Checked 2026-10-20: `grep -rn cpu_en rtl tools/rv32i_check` finds nothing.
+
+## 9. Memory interface and RVVI retire trace (Task 8)
+
+### 9.1 Core ports and memory map
+
+The memories are outside the core. `RISC_V_Top` has:
+
+| Port | Dir | Meaning |
+|---|---|---|
+| `imem_addr[31:0]`, `imem_rdata[31:0]` | out / in | instruction fetch, **combinational** read (the PC is `imem_addr`) |
+| `dmem_re`, `dmem_we[3:0]`, `dmem_addr[31:0]`, `dmem_wdata[31:0]` | out | data bus; `dmem_we` are byte enables, `dmem_wdata` is lane-aligned |
+| `dmem_rdata[31:0]` | in | the whole word, **one cycle after** `dmem_re` |
+
+The load/store unit (`StageMemory/LSU.v`) stays in the core: `sb` replicates the byte and `sh` the half-word into every lane and sets the byte enables of the lane addressed; loads pick and extend the lane with the format and offset registered together with the request. A half-word store ignores address bit 0 and a word store ignores bits 1:0 (misaligned accesses are not detected until W2-1 is recorded).
+
+`rtl/top/core_tb_top.sv` decodes the bus (spec 4.1): ITCM `0x0000_0000` 16 KB (fetch only, `rtl/mem/itcm.sv`, a fetch outside returns a NOP), DTCM `0x0001_0000` 64 KB (`core_tb_dtcm.sv`, a stand-in for Track B's `dtcm_dp` port A), `SIM_CTRL` `0x0002_0000` and `SIM_PUTC` `0x0002_0004`. Any other data address, including the ITCM seen as data, reads 0 and ignores writes (W2-1 open). Open question for Task 13: spec 4.1 makes the ITCM fetch-only, but the Phase 2 plan puts `.rodata` in the ITCM; a load from the ITCM would then read 0.
+
+`SIM_CTRL` accepts word writes only: `0x1` prints `PASS` and ends the run, `0x2` prints `FAIL` and ends the run, `0x10`, `0x20`, `0x21` print `BATCH_DONE`, `MEAS_START`, `MEAS_STOP`. `SIM_PUTC` prints the low byte.
+
+### 9.2 Retire trace (`ifdef RVVI_TRACE`)
+
+One record per instruction leaving WB, so stalls and flushes never repeat or skip one. The fields and their meaning are the contract for `model/c/rv_iss.c` (Task 12):
+
+| Field | Meaning |
+|---|---|
+| `rvvi_valid` | a record is present this cycle |
+| `rvvi_order[63:0]` | retired instructions before this one, counted from reset (0, 1, 2, ...) |
+| `rvvi_pc`, `rvvi_insn` | address and encoding of the retired instruction |
+| `rvvi_rd`, `rvvi_rd_wdata` | destination and the value written; both 0 when nothing (or `x0`) is written |
+| `rvvi_mem_addr` | effective address of a load or store, else 0 |
+| `rvvi_mem_wdata`, `rvvi_mem_wmask` | the lane-aligned word and the byte enables on the write bus; 0 for loads and non-memory instructions |
+| `rvvi_trap` | 0 until decision W2-1 defines traps |
+
+`core_tb_top` writes the records to the file given by `+RVVI_LOG=<file>`, one hex line per retire: `order pc insn rd rd_wdata mem_addr mem_wdata mem_wmask trap`. `tools/rv32i_check` compares this whole trace with `RefISS` for every test, which also closes the blind spot noted in `docs/core_stall.md` section 4 (a missing EX/MEM bubble shows as a repeated record). `mcycle`/`cycle` reads are the one value that is masked in that comparison, because the RTL counts real cycles and `RefISS` counts one per instruction.

@@ -8,14 +8,14 @@ from run import assemble, RefISS, M32
 os.makedirs("build", exist_ok=True)
 results = {}
 
-def run(src, tag, steps, memmap="sp1"):
+def run(src, tag, steps):
     prog = assemble(".text\n" + src + "\nend: j end\n", tag)
-    s = RefISS(prog, memmap)
+    s = RefISS(prog)
     for _ in range(steps): s.step()
     return s
 
-def check(name, src, steps, regs, cmd_log=None, memmap="sp1"):
-    s = run(src, "refiss_" + name, steps, memmap)
+def check(name, src, steps, regs, cmd_log=None):
+    s = run(src, "refiss_" + name, steps)
     bad = [f"x{r}: got {s.x[r]:08x} want {v:08x}" for r, v in regs.items() if s.x[r] != v]
     if cmd_log is not None and s.cmd_log != cmd_log:
         bad.append(f"cmd_log: got {s.cmd_log} want {cmd_log}")
@@ -99,10 +99,32 @@ check("fencei_nop", "addi x1,x0,1\n fence.i\n addi x2,x1,1\n", 3, {1: 1, 2: 2})
 
 # ---- spec memory map: DTCM, SIM_PUTC, SIM_CTRL
 s = run("lui x5,0x10\n li x6,0xA5\n sw x6,0(x5)\n lw x7,0(x5)\n lui x8,0x20\n li x9,0x41\n"
-        "sb x9,4(x8)\n li x10,1\n sw x10,0(x8)\n", "refiss_spec_map", 9, "spec")
+        "sb x9,4(x8)\n li x10,1\n sw x10,0(x8)\n", "refiss_spec_map", 9)
 ok = (s.x[7] == 0xA5 and s.mem[0] == 0xA5 and s.putc == [0x41] and s.sim_ctrl == [1])
 results["refiss_spec_map"] = ok
 print(f"[{'PASS' if ok else 'FAIL'}] refiss_spec_map")
+
+# ---- RVVI trace fields (hand-computed): store lane alignment, load record, x0 destination
+s = run("lui x5,0x10\n li x6,0x1234ABCD\n sb x6,1(x5)\n sh x6,2(x5)\n sw x6,4(x5)\n lw x7,4(x5)\n addi x0,x0,5\n jal x8,L\nL: nop\n",
+        "refiss_trace", 11)
+# 0x1234ABCD = lui 0x1234B000 + addi -0x433; (order, pc, rd, rd_wdata, mem_addr, mem_wdata, mem_wmask)
+want = [(0, 0x00, 5, 0x00010000, 0, 0, 0),                          # lui x5
+        (1, 0x04, 6, 0x1234B000, 0, 0, 0),                          # lui x6
+        (2, 0x08, 6, 0x1234ABCD, 0, 0, 0),                          # addi x6
+        (3, 0x0C, 0, 0, 0x10001, 0xCDCDCDCD, 0b0010),               # sb at lane 1: byte replicated
+        (4, 0x10, 0, 0, 0x10002, 0xABCDABCD, 0b1100),               # sh at the upper half
+        (5, 0x14, 0, 0, 0x10004, 0x1234ABCD, 0b1111),               # sw
+        (6, 0x18, 7, 0x1234ABCD, 0x10004, 0, 0),                    # lw: address recorded, no write data
+        (7, 0x1C, 0, 0, 0, 0, 0),                                   # addi x0: nothing written
+        (8, 0x20, 8, 0x00000024, 0, 0, 0),                          # jal links pc+4
+        (9, 0x24, 0, 0, 0, 0, 0)]                                   # nop
+got = [(t[0], t[1], t[3], t[4], t[5], t[6], t[7]) for t in s.trace[:10]]
+ok = (got == want) and all(t[8] == 0 for t in s.trace)
+results["refiss_trace"] = ok
+print(f"[{'PASS' if ok else 'FAIL'}] refiss_trace")
+if not ok:
+    for g, w in zip(got, want):
+        if g != w: print("        got", [hex(v) for v in g], "want", [hex(v) for v in w])
 
 print("\nSUMMARY:", sum(results.values()), "/", len(results), "pass")
 json.dump(results, open("build/results_refiss.json", "w"), indent=1)

@@ -37,7 +37,8 @@ T = {
  "csr_imm_not_a_register_use": " lw x1,0(x0)\n csrrwi x2,0x7c1,1\n csrrsi x3,0x7c1,2\n csrr x4,0x7c1\n",
 }
 fails = []
+CYCLE_DEPENDENT = {"mcycle_ge_minstret"}      # computes on raw mcycle values: RVVI rd_wdata not compared after them
 for k, v in T.items():
-    if compare(".text\n" + v + E, k, steps=300, cycles=900): fails.append(k)
+    if compare(".text\n" + v + E, k, steps=300, cycles=900, cycle_dependent=(k in CYCLE_DEPENDENT)): fails.append(k)
 print(f"\nZICSR: {len(T)-len(fails)}/{len(T)} pass; FAIL={fails}")
 json.dump({k: (k not in fails) for k in T}, open("build/results_csr.json", "w"), indent=1)

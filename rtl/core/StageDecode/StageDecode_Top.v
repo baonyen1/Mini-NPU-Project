@@ -42,7 +42,8 @@ module StageDecode_Top(
     csr_op_ID_EX,
     fence_i_ID_EX,
     custom_ctl_ID_EX,
-    valid_ID_EX
+    valid_ID_EX,
+    insn_ID_EX
 );
 
 input clk, reset, stall, flush;
@@ -82,6 +83,7 @@ output [2:0] csr_op_ID_EX;
 output fence_i_ID_EX;
 output [4:0] custom_ctl_ID_EX;
 output valid_ID_EX;
+output [31:0] insn_ID_EX;
 
 wire [4:0] regfile_write_address;
 wire [4:0] regfile_read_address_0;
@@ -174,6 +176,7 @@ ID_EX_Reg ID_EX(
     .fence_i(fence_i),
     .custom_ctl(custom_ctl),
     .valid(valid_IF_ID),
+    .insn(Instruction_IF_ID),
 
     .Instruction_address_ID_EX(Instruction_address_ID_EX),
     .regfile_out_0_ID_EX(regfile_out_0_ID_EX),
@@ -198,7 +201,8 @@ ID_EX_Reg ID_EX(
     .csr_op_ID_EX(csr_op_ID_EX),
     .fence_i_ID_EX(fence_i_ID_EX),
     .custom_ctl_ID_EX(custom_ctl_ID_EX),
-    .valid_ID_EX(valid_ID_EX)
+    .valid_ID_EX(valid_ID_EX),
+    .insn_ID_EX(insn_ID_EX)
 );
 
 endmodule

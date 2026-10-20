@@ -25,6 +25,7 @@ module StageExecute_Top(
     csr_op_ID_EX,
     fence_i_ID_EX,
     custom_ctl_ID_EX,
+    insn_ID_EX,
     regfile_read_address_0_ID_EX,
     valid_ID_EX,
 
@@ -68,7 +69,8 @@ module StageExecute_Top(
     regfile_write_enable_EX_MEM,
     regfile_write_address_EX_MEM,
     valid_EX_MEM,
-    custom_ctl_EX_MEM
+    custom_ctl_EX_MEM,
+    insn_EX_MEM
 );
 
 input clk, reset;
@@ -93,6 +95,7 @@ input [1:0] writeback_mux_sel_ID_EX;
 input [2:0] csr_op_ID_EX;
 input fence_i_ID_EX;
 input [4:0] custom_ctl_ID_EX;
+input [31:0] insn_ID_EX;
 input [4:0] regfile_read_address_0_ID_EX;
 input valid_ID_EX;
 
@@ -131,6 +134,7 @@ output regfile_write_enable_EX_MEM;
 output [4:0] regfile_write_address_EX_MEM;
 output valid_EX_MEM;
 output [4:0] custom_ctl_EX_MEM;
+output [31:0] insn_EX_MEM;
 
 wire [31:0] fw_mux_0_output;
 wire [31:0] fw_mux_1_output;
@@ -315,6 +319,7 @@ EX_MEM_Reg EX_MEM(
     .regfile_write_address_ID_EX(regfile_write_address_ID_EX),
     .valid_ID_EX(valid_ID_EX),
     .custom_ctl_ID_EX(custom_ctl_ID_EX),
+    .insn_ID_EX(insn_ID_EX),
 
     .Instruction_address_EX_MEM(Instruction_address_EX_MEM),
     .alu_out_EX_MEM(alu_out_EX_MEM),
@@ -326,7 +331,8 @@ EX_MEM_Reg EX_MEM(
     .regfile_write_enable_EX_MEM(regfile_write_enable_EX_MEM),
     .regfile_write_address_EX_MEM(regfile_write_address_EX_MEM),
     .valid_EX_MEM(valid_EX_MEM),
-    .custom_ctl_EX_MEM(custom_ctl_EX_MEM)
+    .custom_ctl_EX_MEM(custom_ctl_EX_MEM),
+    .insn_EX_MEM(insn_EX_MEM)
 );
 
 endmodule
