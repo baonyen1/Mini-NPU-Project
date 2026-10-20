@@ -1,3 +1,27 @@
 # Tests that are allowed to fail right now. run_all.py fails on anything else,
-# and also fails when a test listed here starts passing (delete its line then).
+# and also fails when an entry here matches no failing test (delete the line then).
+# Entries are test names or fnmatch patterns; every entry needs a dated reason.
+#
 # 2026-10-09: empty - full RV32I base implemented (plan Task 3).
+# 2026-10-20: plan Task 4 added the tests for M, Zicsr, Zbb/Zifencei and custom-0
+# before the RTL exists (test first). Each line below is deleted by the commit
+# that implements its feature.
+m_*                                  # 2026-10-20: M extension not implemented yet (plan Task 5)
+randm_*                              # 2026-10-20: M extension not implemented yet (plan Task 5)
+csr_ops_all6                         # 2026-10-20: Zicsr not implemented yet (plan Task 6)
+minstret_delta                       # 2026-10-20: Zicsr not implemented yet (plan Task 6)
+mcycle_ge_minstret                   # 2026-10-20: Zicsr not implemented yet (plan Task 6)
+cycle_alias_reads                    # 2026-10-20: Zicsr not implemented yet (plan Task 6)
+csrrw_x0_still_writes_csr            # 2026-10-20: Zicsr not implemented yet (plan Task 6)
+csr_raw_back_to_back                 # 2026-10-20: Zicsr not implemented yet (plan Task 6)
+csr_minstret_with_stalls_and_flushes # 2026-10-20: Zicsr not implemented yet (plan Task 6)
+csr_status_w1c                       # 2026-10-20: Zicsr not implemented yet (plan Task 6)
+csr_rs_rc_x0_no_write                # 2026-10-20: Zicsr not implemented yet (plan Task 6)
+csr_unknown_reads_zero               # 2026-10-20: Zicsr not implemented yet (plan Task 6)
+csr_counters_read_only               # 2026-10-20: Zicsr not implemented yet (plan Task 6)
+csr_result_forwarded                 # 2026-10-20: Zicsr not implemented yet (plan Task 6)
+csr_rs1_after_load                   # 2026-10-20: Zicsr not implemented yet (plan Task 6)
+csr_imm_not_a_register_use           # 2026-10-20: Zicsr not implemented yet (plan Task 6)
+zbb_*                                # 2026-10-20: Zbb / fence.i not implemented yet (plan Task 7)
+randzbb_*                            # 2026-10-20: Zbb not implemented yet (plan Task 7)
+custom_*                             # 2026-10-20: custom-0 push and engine stub not implemented yet (plan Task 9)

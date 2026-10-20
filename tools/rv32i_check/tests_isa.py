@@ -20,7 +20,7 @@ for op, imm in I:
     results[op] = not compare(src, op)
 results["lui"] = not compare(PRE + "  lui x10, 0xABCDE\n" + END, "lui")
 results["auipc"] = not compare(PRE + "  auipc x10, 0x1\n  auipc x11, 0\n" + END, "auipc")
-LDST = PRE + "  li x5, 0x100\n  li x6, 0x8091A2B3\n  sw x6, 0(x5)\n  nop\n  nop\n"
+LDST = PRE + "  li x5, DM+0x100\n  li x6, 0x8091A2B3\n  sw x6, 0(x5)\n  nop\n  nop\n"
 for op in ["lb","lh","lw","lbu","lhu"]:
     offs = [0,1,2,3] if op in ("lb","lbu") else ([0,2] if op in ("lh","lhu") else [0])
     body = "".join(f"  {op} x{10+i}, {o}(x5)\n" for i,o in enumerate(offs))
