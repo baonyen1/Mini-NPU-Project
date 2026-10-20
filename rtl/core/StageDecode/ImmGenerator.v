@@ -18,11 +18,13 @@ localparam OPCODE_JAL    = 7'b1101111;
 localparam OPCODE_JALR   = 7'b1100111;
 localparam OPCODE_LUI    = 7'b0110111;
 localparam OPCODE_AUIPC  = 7'b0010111;
+localparam OPCODE_SYSTEM = 7'b1110011; // CSR address = Imm_out[11:0]
 
 always @(*) begin
     case (Opcode)
         OPCODE_I_ALU,
         OPCODE_LOAD,
+        OPCODE_SYSTEM,
         OPCODE_JALR: begin
             Imm_out = {{20{instruction[31]}}, instruction[31:20]};
         end

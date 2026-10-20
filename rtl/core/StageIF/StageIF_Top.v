@@ -10,7 +10,8 @@ module StageIF_TOP (
     jump_branch_destination,
 
     Instruction_IF_ID,
-    Instruction_address_IF_ID
+    Instruction_address_IF_ID,
+    valid_IF_ID
 );
 
 input clk, reset;
@@ -21,6 +22,7 @@ input [31:0] jump_branch_destination;
 
 output [31:0] Instruction_IF_ID;
 output [31:0] Instruction_address_IF_ID;
+output valid_IF_ID;
 
 wire [31:0] next_instruction_address;
 wire [31:0] Instruction_address_IF;
@@ -63,7 +65,8 @@ IF_ID_Reg IF_ID(
     .Instruction_IF(Instruction_IF),
 
     .Instruction_address_IF_ID(Instruction_address_IF_ID),
-    .Instruction_IF_ID(Instruction_IF_ID)
+    .Instruction_IF_ID(Instruction_IF_ID),
+    .valid_IF_ID(valid_IF_ID)
 );
 
 endmodule

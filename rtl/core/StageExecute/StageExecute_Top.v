@@ -22,12 +22,24 @@ module StageExecute_Top(
     datamem_write_enable_ID_EX,
     regfile_write_enable_ID_EX,
     writeback_mux_sel_ID_EX,
+    csr_op_ID_EX,
+    regfile_read_address_0_ID_EX,
+    valid_ID_EX,
 
     // stall interface (Hazard_Unit, docs/core_stall.md)
     ex_stall,
     ex_mem_stall,
     ex_mem_bubble,
     div_busy,
+
+    // engine CSR port (spec 7.1)
+    csr_we,
+    csr_addr,
+    csr_wdata,
+    csr_rdata,
+
+    // retire information for minstret
+    valid_MEM_WB,
 
     // forwarding sources from MEM and MEM/WB
     alu_out_MEM_WB,
@@ -50,7 +62,8 @@ module StageExecute_Top(
     datamem_write_enable_EX_MEM,
     writeback_mux_sel_EX_MEM,
     regfile_write_enable_EX_MEM,
-    regfile_write_address_EX_MEM
+    regfile_write_address_EX_MEM,
+    valid_EX_MEM
 );
 
 input clk, reset;
@@ -72,6 +85,12 @@ input datamem_read_enable_ID_EX;
 input datamem_write_enable_ID_EX;
 input regfile_write_enable_ID_EX;
 input [1:0] writeback_mux_sel_ID_EX;
+input [2:0] csr_op_ID_EX;
+input [4:0] regfile_read_address_0_ID_EX;
+input valid_ID_EX;
+
+input [31:0] csr_rdata;
+input valid_MEM_WB;
 
 input ex_stall;        // EX cannot advance this cycle
 input ex_mem_stall;    // hold EX/MEM
@@ -84,6 +103,9 @@ input [2:0] fw_mux_0_sel;
 input [2:0] fw_mux_1_sel;
 
 output div_busy;       // a divide/remainder is in EX and its result is not ready
+output csr_we;
+output [11:0] csr_addr;
+output [31:0] csr_wdata;
 
 output jump_branch_signal;
 output flush_signal;
@@ -98,6 +120,7 @@ output datamem_write_enable_EX_MEM;
 output [1:0] writeback_mux_sel_EX_MEM;
 output regfile_write_enable_EX_MEM;
 output [4:0] regfile_write_address_EX_MEM;
+output valid_EX_MEM;
 
 wire [31:0] fw_mux_0_output;
 wire [31:0] fw_mux_1_output;
@@ -203,7 +226,30 @@ always @(posedge clk) begin
         div_started <= 1'b0;
 end
 
-assign ex_result = is_mul_op ? mul_result :
+// ---- Zicsr --------------------------------------------------------------
+wire csr_is_op = (csr_op_ID_EX[1:0] != 2'b00);
+wire [31:0] csr_operand = csr_op_ID_EX[2] ? {27'b0, regfile_read_address_0_ID_EX} : fw_mux_0_output;
+wire [31:0] csr_value;
+wire [1:0] older_in_flight = valid_EX_MEM + valid_MEM_WB;   // valid instructions in MEM and WB
+
+CSR_Unit CSR(
+    .clk(clk),
+    .reset(reset),
+    .csr_op(csr_op_ID_EX),
+    .csr_addr(immediate_ID_EX[11:0]),
+    .wdata(csr_operand),
+    .rs1_nonzero(regfile_read_address_0_ID_EX != 5'b00000),
+    .rdata(csr_value),
+    .retire(valid_MEM_WB),
+    .older_in_flight(older_in_flight),
+    .npu_csr_we(csr_we),
+    .npu_csr_addr(csr_addr),
+    .npu_csr_wdata(csr_wdata),
+    .npu_csr_rdata(csr_rdata)
+);
+
+assign ex_result = csr_is_op ? csr_value :
+                   is_mul_op ? mul_result :
                    is_div_op ? div_result :
                    alu_output;
 
@@ -235,6 +281,7 @@ EX_MEM_Reg EX_MEM(
     .writeback_mux_sel_ID_EX(writeback_mux_sel_ID_EX),
     .regfile_write_enable_ID_EX(regfile_write_enable_ID_EX),
     .regfile_write_address_ID_EX(regfile_write_address_ID_EX),
+    .valid_ID_EX(valid_ID_EX),
 
     .Instruction_address_EX_MEM(Instruction_address_EX_MEM),
     .alu_out_EX_MEM(alu_out_EX_MEM),
@@ -244,7 +291,8 @@ EX_MEM_Reg EX_MEM(
     .datamem_write_enable_EX_MEM(datamem_write_enable_EX_MEM),
     .writeback_mux_sel_EX_MEM(writeback_mux_sel_EX_MEM),
     .regfile_write_enable_EX_MEM(regfile_write_enable_EX_MEM),
-    .regfile_write_address_EX_MEM(regfile_write_address_EX_MEM)
+    .regfile_write_address_EX_MEM(regfile_write_address_EX_MEM),
+    .valid_EX_MEM(valid_EX_MEM)
 );
 
 endmodule

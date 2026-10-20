@@ -7,7 +7,7 @@ Spec: `docs/superpowers/specs/2026-10-04-mini-npu-design.md` §5–§6.
 |---|---|---|
 | RV32I (base, 40 instructions) | ✅ implemented, regression green | 3 |
 | M (`mul*`, `div*`, `rem*`) | ✅ implemented, regression green (2026-10-20) | 5 |
-| Zicsr + counters, `npu_status`/`npu_busy_cyc` | ⬜ planned | 6 |
+| Zicsr + counters, `npu_status`/`npu_busy_cyc` | ✅ implemented, regression green (2026-10-20) | 6 |
 | Zifencei, Zbb | ⬜ planned | 7 |
 | custom-0 (LOAD_WEIGHT, LOAD_INPUT, COMPUTE, READ_RESULT) | ⬜ planned | 9 |
 
@@ -57,6 +57,14 @@ The `ALU op` column is the 4-bit `alu_operation` that `Control.v` sends to `ALU.
 - **Divider** (`StageExecute/Divider.v`): restoring, one quotient bit per cycle, absolute values with the signs fixed at the end. `DIV`/`REM` by zero return all ones / the dividend; `-2^31 / -1` returns `-2^31` / 0. Those two cases skip the loop (one stall cycle). A normal divide occupies EX for 34 cycles (1 start + 32 iterations + the cycle that hands over the result).
 - **Stall.** `div_busy = divide in EX and not done` freezes PC, IF/ID and ID/EX and loads a bubble into EX/MEM every cycle (`docs/core_stall.md` section 3). The divider samples its operands in the first EX cycle (`div_started` marks that this has happened), because the forwarding sources vanish while the instruction waits.
 - **Result.** The M result enters EX/MEM like an ALU result, so the normal forwarding path serves it.
+
+### 2.2 Zicsr and counters (Task 6)
+
+- **Where.** CSR instructions execute in EX (`CSR_Unit.v`): read and write in one cycle. An instruction in EX is never on a wrong path (a branch redirects from EX and flushes only younger instructions), so the write may happen at the end of that cycle. The old value goes down the pipe as an ALU result, so the normal forwarding path serves it. `Control.v` sends `csr_op` (= funct3 for CSR instructions, 000 otherwise); the CSR address is `Imm[11:0]` (`ImmGenerator` treats SYSTEM as I-type); for `csrr*i` the operand is `zimm = rs1 field`.
+- **Write rule.** `csrrw`/`csrrwi` always write; `csrrs`/`csrrc` (and the immediate forms) write only when the `rs1` field / `zimm` is not zero. Writing does not depend on `rd`, so `csrrw x0, csr, rs1` still writes.
+- **Counters.** `mcycle` (64-bit) counts every cycle from reset. `minstret` (64-bit) counts instructions leaving WB. A `valid` bit travels with every instruction (IF/ID, ID/EX, EX/MEM, MEM/WB); bubbles (reset, flush, load-use, divider wait) carry `valid = 0` and are not counted.
+- **Exact `minstret`.** A CSR read happens in EX, when the two older instructions in MEM and WB have not retired yet. The value read is `minstret + valid(EX/MEM) + valid(MEM/WB)`, which is exactly the number of instructions older than the reader, whatever bubbles or flushes precede it. `RefISS` models it the same way, so raw `minstret` values can be compared between RTL and ISS. `mcycle` is cycle-accurate in the RTL and ideal in `RefISS`, so tests only use derived booleans of cycle reads.
+- **Provisional rulings (until W2-1 is recorded and Track B confirms section 7).** Writes to `mcycle`/`minstret` and to the read-only aliases are ignored; an unknown CSR address reads 0 and ignores writes.
 
 ## 3. Internal control encodings
 
@@ -237,11 +245,12 @@ Spec §5 and §6.4. All CSRs are 32 bit.
 
 `time` / `timeh` (`0xC01` / `0xC81`) are not implemented. The core forwards `0x7C0` and `0x7C1` to the engine over the CSR port (spec §7.1; `CSR_Unit` ports in plan Task 6).
 
-Open points to settle with Track B before both sign §7.1, because they fix what `csr_*` means:
+Open points to settle with Track B before both sign §7.1, because they fix what `csr_*` means. Task 6 was implemented with the provisional answers below (marked **Ruling**); Track B must confirm or change them, and the engine's CSR port must then follow:
 
-1. **`csr_wdata` for `csrrs`/`csrrc` on a W1C register.** If the core sends the read-modify-write result, `csrrs` (`old | mask`) clears every error bit that is currently set, and `csrrc` (`old & ~mask`) clears the bits that are *not* in the mask. If it sends the raw `rs1`/`zimm` operand, the two instructions are indistinguishable. Spec §6.4 does not say. Plan Task 6 test `csr_ops_all6` runs all six instructions against a W1C stub, so the answer decides its expected values.
-2. **`csr_rdata` timing.** Spec §7.1 declares only `output [31:0] csr_rdata`. A read that must forward like an ALU result (Task 6 Step 3) needs it in the same cycle as `csr_addr`; a registered read adds a cycle and a stall.
-3. **Unimplemented address and writes to read-only aliases or to `mcycle`/`minstret`.** Spec silent. Part of W2-1 (§4); the `npu_ref` model already returns 0 for an unknown address in `npu_ref_csr_read`.
+1. **`csr_wdata` for `csrrs`/`csrrc` on a W1C register.** If the core sends the read-modify-write result, `csrrs` (`old | mask`) clears every error bit that is currently set, and `csrrc` (`old & ~mask`) clears the bits that are *not* in the mask. If it sends the raw `rs1`/`zimm` operand, the two instructions are indistinguishable. Spec §6.4 does not say. **Ruling:** `csr_wdata` is the read-modify-write result (the new CSR value), which keeps plain read/write registers such as `npu_busy_cyc` standard-compliant. For `npu_status`, software must use `csrrw`/`csrrwi` to clear error bits; `csrrs`/`csrrc` have the quirks above. Cost if wrong: the engine's CSR port semantics.
+2. **`csr_rdata` timing.** Spec §7.1 declares only `output [31:0] csr_rdata`. **Ruling:** combinational in `csr_addr`, because a CSR read forwards like an ALU result from EX. Cost if wrong: a registered read would need one extra stall cycle for engine CSRs.
+3. **Unimplemented address and writes to read-only aliases or to `mcycle`/`minstret`.** Spec silent. Part of W2-1 (§4). **Ruling:** reads return 0 and writes are ignored (the `npu_ref` model already returns 0 for an unknown address in `npu_ref_csr_read`).
+4. **Test stub.** `rtl/top/npu_stub.sv` models the engine side for the core-only tests: `0x7C0` reads `{err[3:0], 8'b0000_0010}` with the four sticky bits set by reset and W1C on bits 11..8 (spec §6.4 lists bits 8-11; the plan text says 8-10); `0x7C1` is a plain read/write register.
 
 ## 8. `cpu_en` record
 

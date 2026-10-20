@@ -12,6 +12,7 @@
 module Hazard_Unit(
     pipeline_flush_signal,
     opcode_IF_ID,
+    funct3_IF_ID,
     regfile_read_address_0_IF_ID,
     regfile_read_address_1_IF_ID,
 
@@ -43,6 +44,7 @@ module Hazard_Unit(
 
 input pipeline_flush_signal;
 input [6:0] opcode_IF_ID;
+input [2:0] funct3_IF_ID;
 input [4:0] regfile_read_address_0_IF_ID;
 input [4:0] regfile_read_address_1_IF_ID;
 
@@ -82,7 +84,9 @@ assign uses_rs1_IF_ID = (opcode_IF_ID == 7'b0110011) ||
                         (opcode_IF_ID == 7'b0000011) ||
                         (opcode_IF_ID == 7'b0100011) ||
                         (opcode_IF_ID == 7'b1100011) ||
-                        (opcode_IF_ID == 7'b1100111);
+                        (opcode_IF_ID == 7'b1100111) ||
+                        // CSRRW/CSRRS/CSRRC read rs1; the immediate forms carry a zimm there
+                        ((opcode_IF_ID == 7'b1110011) && !funct3_IF_ID[2] && (funct3_IF_ID[1:0] != 2'b00));
 
 assign uses_rs2_IF_ID = (opcode_IF_ID == 7'b0110011) ||
                         (opcode_IF_ID == 7'b0100011) ||

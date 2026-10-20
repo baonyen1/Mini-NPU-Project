@@ -25,6 +25,8 @@ T = {
  # extra directed tests
  "csr_minstret_with_stalls_and_flushes": " li x5,DM+0x40\n csrr x1,0xB02\n sw x5,0(x5)\n lw x6,0(x5)\n add x7,x6,x6\n beq x0,x0,L\n addi x8,x0,1\n addi x8,x0,2\n"
                                           "L: li x2,3\n bne x2,x0,K\n addi x9,x0,1\nK: jal x10,J\n addi x11,x0,1\nJ: csrr x3,0xB02\n sub x4,x3,x1\n",
+ # closes the blind spot found in Task 5: a divide must retire exactly once, so minstret counts it once
+ "minstret_across_divide": " csrr x1,0xB02\n li x2,100\n li x3,7\n div x4,x2,x3\n csrr x5,0xB02\n rem x6,x2,x3\n mul x7,x4,x6\n csrr x8,0xB02\n sub x9,x5,x1\n sub x10,x8,x5\n",
  "csr_status_w1c": " csrr x20,0x7c0\n li x1,0x100\n csrrw x0,0x7c0,x1\n csrr x21,0x7c0\n li x2,0xC00\n csrrs x22,0x7c0,x2\n csrr x23,0x7c0\n",
  "csr_rs_rc_x0_no_write": " csrrs x1,0x7c0,x0\n csrrc x2,0x7c0,x0\n csrrsi x3,0x7c0,0\n csrrci x4,0x7c0,0\n csrr x5,0x7c0\n",
  "csr_unknown_reads_zero": " li x2,0x55\n nop\n nop\n csrr x6,0xB02\n csrr x1,0x7ff\n csrrw x0,0x7ff,x2\n csrr x3,0x7ff\n csrr x4,0xC01\n csrr x5,0x7c2\n",

@@ -42,6 +42,7 @@ def build_sim():
     """Compile the DUT with iverilog (core only under sp1)."""
     os.makedirs("build", exist_ok=True)
     srcs = glob.glob(os.path.join(CORE, "**", "*.v"), recursive=True)
+    srcs += [os.path.join(ROOT, "rtl", "top", "npu_stub.sv")]
     cmd = ["iverilog", "-g2012", f"-DMEM_WORDS={CMP_WORDS}", "-o", "build/sim.vvp", "tb_dump.v"] + srcs
     subprocess.run(cmd, check=True)
 

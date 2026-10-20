@@ -15,7 +15,8 @@ module Control_Unit (
     Jump,
     JumpTargetSel,
     DataFormat,
-    WB_sel
+    WB_sel,
+    csr_op
 );
 
 input [6:0] Opcode;
@@ -33,6 +34,7 @@ output reg JumpTargetSel;
 output reg [2:0] DataFormat;
 output reg [1:0] WB_sel;
 output reg [2:0] alu_branch_control;
+output reg [2:0] csr_op;   // funct3 of a CSR instruction, 000 for everything else
 output reg [5:0] alu_operation;
 
 localparam ALU_AND = 6'b000000;
@@ -60,6 +62,7 @@ always @(*) begin
     WB_sel             = 2'b00;
     alu_branch_control = 3'b000;
     alu_operation      = ALU_ADD;
+    csr_op             = 3'b000;
 
     case (Opcode)
         7'b0110011: begin // R-type: ADD SUB SLL SLT SLTU XOR SRL SRA OR AND, and RV32M
@@ -238,6 +241,13 @@ always @(*) begin
             JumpTargetSel = 1'b0;
             reg_write     = 1'b1;
             WB_sel        = 2'b10;
+        end
+
+        7'b1110011: begin // SYSTEM: CSRRW CSRRS CSRRC CSRRWI CSRRSI CSRRCI (ecall/ebreak stay NOPs)
+            if ((fun3 != 3'b000) && (fun3 != 3'b100)) begin
+                reg_write = 1'b1;
+                csr_op    = fun3;
+            end
         end
 
         7'b1100111: begin // JALR

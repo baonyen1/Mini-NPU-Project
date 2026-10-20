@@ -14,6 +14,7 @@ module StageMemory_Top(
     writeback_mux_sel_EX_MEM,
     regfile_write_enable_EX_MEM,
     regfile_write_address_EX_MEM,
+    valid_EX_MEM,
 
     // output to MEM/WB
     Instruction_address_MEM_WB,
@@ -21,7 +22,8 @@ module StageMemory_Top(
     datamem_out_MEM_WB,
     writeback_mux_sel_MEM_WB,
     regfile_write_enable_MEM_WB,
-    regfile_write_address_MEM_WB
+    regfile_write_address_MEM_WB,
+    valid_MEM_WB
 );
 
 input clk, reset;
@@ -35,6 +37,7 @@ input datamem_write_enable_EX_MEM;
 input [1:0] writeback_mux_sel_EX_MEM;
 input regfile_write_enable_EX_MEM;
 input [4:0] regfile_write_address_EX_MEM;
+input valid_EX_MEM;
 
 output [31:0] Instruction_address_MEM_WB;
 output [31:0] alu_out_MEM_WB;
@@ -42,6 +45,7 @@ output [31:0] datamem_out_MEM_WB;
 output [1:0] writeback_mux_sel_MEM_WB;
 output regfile_write_enable_MEM_WB;
 output [4:0] regfile_write_address_MEM_WB;
+output valid_MEM_WB;
 
 LSU LOAD_STORE_UNIT(
     .clk(clk),
@@ -63,12 +67,14 @@ MEM_WB_Reg MEM_WB(
     .writeback_mux_sel_EX_MEM(writeback_mux_sel_EX_MEM),
     .regfile_write_enable_EX_MEM(regfile_write_enable_EX_MEM),
     .regfile_write_address_EX_MEM(regfile_write_address_EX_MEM),
+    .valid_EX_MEM(valid_EX_MEM),
 
     .Instruction_address_MEM_WB(Instruction_address_MEM_WB),
     .alu_out_MEM_WB(alu_out_MEM_WB),
     .writeback_mux_sel_MEM_WB(writeback_mux_sel_MEM_WB),
     .regfile_write_enable_MEM_WB(regfile_write_enable_MEM_WB),
-    .regfile_write_address_MEM_WB(regfile_write_address_MEM_WB)
+    .regfile_write_address_MEM_WB(regfile_write_address_MEM_WB),
+    .valid_MEM_WB(valid_MEM_WB)
 );
 
 endmodule

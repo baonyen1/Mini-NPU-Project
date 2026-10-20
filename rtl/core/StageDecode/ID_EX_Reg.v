@@ -28,6 +28,8 @@ module ID_EX_Reg(
     datamem_write_enable,
     regfile_write_enable,
     writeback_mux_sel,
+    csr_op,
+    valid,
 
     // data to Execute
     Instruction_address_ID_EX,
@@ -50,7 +52,9 @@ module ID_EX_Reg(
     datamem_read_enable_ID_EX,
     datamem_write_enable_ID_EX,
     regfile_write_enable_ID_EX,
-    writeback_mux_sel_ID_EX
+    writeback_mux_sel_ID_EX,
+    csr_op_ID_EX,
+    valid_ID_EX
 );
 
 input clk, reset, stall, flush;
@@ -76,6 +80,8 @@ input datamem_read_enable;
 input datamem_write_enable;
 input regfile_write_enable;
 input [1:0] writeback_mux_sel;
+input [2:0] csr_op;
+input valid;
 
 output reg [31:0] Instruction_address_ID_EX;
 output reg [31:0] regfile_out_0_ID_EX;
@@ -98,6 +104,8 @@ output reg datamem_read_enable_ID_EX;
 output reg datamem_write_enable_ID_EX;
 output reg regfile_write_enable_ID_EX;
 output reg [1:0] writeback_mux_sel_ID_EX;
+output reg [2:0] csr_op_ID_EX;
+output reg valid_ID_EX;
 
 always @(posedge clk) begin
     if (reset) begin
@@ -122,6 +130,8 @@ always @(posedge clk) begin
         datamem_write_enable_ID_EX  <= 1'b0;
         regfile_write_enable_ID_EX  <= 1'b0;
         writeback_mux_sel_ID_EX     <= 2'b00;
+        csr_op_ID_EX                <= 3'b000;
+        valid_ID_EX                 <= 1'b0;
     end
     else if (flush) begin
         Instruction_address_ID_EX <= 32'b0;
@@ -145,6 +155,8 @@ always @(posedge clk) begin
         datamem_write_enable_ID_EX  <= 1'b0;
         regfile_write_enable_ID_EX  <= 1'b0;
         writeback_mux_sel_ID_EX     <= 2'b00;
+        csr_op_ID_EX                <= 3'b000;
+        valid_ID_EX                 <= 1'b0;
     end
     else if (!stall) begin
         Instruction_address_ID_EX <= Instruction_address_IF_ID;
@@ -168,6 +180,8 @@ always @(posedge clk) begin
         datamem_write_enable_ID_EX  <= datamem_write_enable;
         regfile_write_enable_ID_EX  <= regfile_write_enable;
         writeback_mux_sel_ID_EX     <= writeback_mux_sel;
+        csr_op_ID_EX                <= csr_op;
+        valid_ID_EX                 <= valid;
     end
 end
 

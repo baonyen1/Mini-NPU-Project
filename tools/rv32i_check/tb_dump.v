@@ -17,10 +17,15 @@
 module tb_dump;
   reg clk=0, reset=1;
   wire [31:0] i0,i1,i2,i3,i4,i5,i6; wire j;
+  wire csr_we; wire [11:0] csr_addr; wire [31:0] csr_wdata, csr_rdata;
   RISC_V_Top dut(.clk(clk),.reset(reset),
     .Instruction_IF_ID(i0),.Instruction_address_IF_ID(i1),.Instruction_address_ID_EX(i2),
     .Instruction_address_EX_MEM(i3),.Instruction_address_MEM_WB(i4),.alu_out_EX_MEM(i5),
-    .regfile_write_data_WB(i6),.jump_branch_signal(j));
+    .regfile_write_data_WB(i6),.jump_branch_signal(j),
+    .csr_we(csr_we),.csr_addr(csr_addr),.csr_wdata(csr_wdata),.csr_rdata(csr_rdata));
+  // engine-side CSR stand-in (0x7C0 W1C status, 0x7C1 scratch); same model as RefISS
+  npu_stub stub(.clk(clk),.rst_n(~reset),.csr_we(csr_we),.csr_addr(csr_addr),
+                .csr_wdata(csr_wdata),.csr_rdata(csr_rdata));
   always #5 clk=~clk;
   integer k, f, cycles;
   initial begin

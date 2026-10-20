@@ -10,7 +10,8 @@ module IF_ID_Reg(
     Instruction_IF,
 
     Instruction_address_IF_ID,
-    Instruction_IF_ID
+    Instruction_IF_ID,
+    valid_IF_ID
 );
 
 input clk, reset;
@@ -21,19 +22,23 @@ input [31:0] Instruction_IF;
 
 output reg [31:0] Instruction_address_IF_ID;
 output reg [31:0] Instruction_IF_ID;
+output reg valid_IF_ID;   // 1: a fetched instruction, 0: a bubble (reset or flush)
 
 always @(posedge clk) begin
     if (reset) begin
         Instruction_address_IF_ID <= 32'b0;
         Instruction_IF_ID         <= 32'h00000013; // NOP: addi x0, x0, 0
+        valid_IF_ID               <= 1'b0;
     end
     else if (flush) begin
         Instruction_address_IF_ID <= 32'b0;
         Instruction_IF_ID         <= 32'h00000013; // NOP
+        valid_IF_ID               <= 1'b0;
     end
     else if (!stall) begin
         Instruction_address_IF_ID <= Instruction_address_IF;
         Instruction_IF_ID         <= Instruction_IF;
+        valid_IF_ID               <= 1'b1;
     end
 end
 

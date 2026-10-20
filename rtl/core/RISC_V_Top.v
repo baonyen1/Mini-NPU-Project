@@ -11,7 +11,13 @@ module RISC_V_Top(
     Instruction_address_MEM_WB,
     alu_out_EX_MEM,
     regfile_write_data_WB,
-    jump_branch_signal
+    jump_branch_signal,
+
+    // engine CSR port (spec 7.1)
+    csr_we,
+    csr_addr,
+    csr_wdata,
+    csr_rdata
 );
 
 input clk, reset;
@@ -24,6 +30,11 @@ output [31:0] Instruction_address_MEM_WB;
 output [31:0] alu_out_EX_MEM;
 output [31:0] regfile_write_data_WB;
 output jump_branch_signal;
+
+output csr_we;
+output [11:0] csr_addr;
+output [31:0] csr_wdata;
+input [31:0] csr_rdata;
 
 wire [31:0] jump_branch_destination;
 
@@ -45,6 +56,8 @@ wire datamem_read_enable_ID_EX;
 wire datamem_write_enable_ID_EX;
 wire regfile_write_enable_ID_EX;
 wire [1:0] writeback_mux_sel_ID_EX;
+wire [2:0] csr_op_ID_EX;
+wire valid_IF_ID, valid_ID_EX, valid_EX_MEM, valid_MEM_WB;
 
 wire [31:0] datamem_wr_data_EX_MEM;
 wire [2:0] data_format_EX_MEM;
@@ -78,6 +91,7 @@ wire [2:0] fw_mux_1_sel;
 Hazard_Unit HAZARD_UNIT(
     .pipeline_flush_signal(pipeline_flush_signal),
     .opcode_IF_ID(Instruction_IF_ID[6:0]),
+    .funct3_IF_ID(Instruction_IF_ID[14:12]),
     .regfile_read_address_0_IF_ID(Instruction_IF_ID[19:15]),
     .regfile_read_address_1_IF_ID(Instruction_IF_ID[24:20]),
     .datamem_read_enable_ID_EX(datamem_read_enable_ID_EX),
@@ -112,7 +126,8 @@ StageIF_TOP IF_STAGE(
     .jump_branch_destination(jump_branch_destination),
 
     .Instruction_IF_ID(Instruction_IF_ID),
-    .Instruction_address_IF_ID(Instruction_address_IF_ID)
+    .Instruction_address_IF_ID(Instruction_address_IF_ID),
+    .valid_IF_ID(valid_IF_ID)
 );
 
 StageDecode_Top DECODE_STAGE(
@@ -123,6 +138,7 @@ StageDecode_Top DECODE_STAGE(
 
     .Instruction_IF_ID(Instruction_IF_ID),
     .Instruction_address_IF_ID(Instruction_address_IF_ID),
+    .valid_IF_ID(valid_IF_ID),
 
     .regfile_write_enable_MEM_WB(regfile_write_enable_WB),
     .regfile_write_address_MEM_WB(regfile_write_address_WB),
@@ -147,7 +163,9 @@ StageDecode_Top DECODE_STAGE(
     .datamem_read_enable_ID_EX(datamem_read_enable_ID_EX),
     .datamem_write_enable_ID_EX(datamem_write_enable_ID_EX),
     .regfile_write_enable_ID_EX(regfile_write_enable_ID_EX),
-    .writeback_mux_sel_ID_EX(writeback_mux_sel_ID_EX)
+    .writeback_mux_sel_ID_EX(writeback_mux_sel_ID_EX),
+    .csr_op_ID_EX(csr_op_ID_EX),
+    .valid_ID_EX(valid_ID_EX)
 );
 
 StageExecute_Top EXECUTE_STAGE(
@@ -171,6 +189,15 @@ StageExecute_Top EXECUTE_STAGE(
     .datamem_write_enable_ID_EX(datamem_write_enable_ID_EX),
     .regfile_write_enable_ID_EX(regfile_write_enable_ID_EX),
     .writeback_mux_sel_ID_EX(writeback_mux_sel_ID_EX),
+    .csr_op_ID_EX(csr_op_ID_EX),
+    .regfile_read_address_0_ID_EX(regfile_read_address_0_ID_EX),
+    .valid_ID_EX(valid_ID_EX),
+
+    .csr_we(csr_we),
+    .csr_addr(csr_addr),
+    .csr_wdata(csr_wdata),
+    .csr_rdata(csr_rdata),
+    .valid_MEM_WB(valid_MEM_WB),
 
     .ex_stall(hazard_id_ex_stall),
     .ex_mem_stall(1'b0),
@@ -195,7 +222,8 @@ StageExecute_Top EXECUTE_STAGE(
     .datamem_write_enable_EX_MEM(datamem_write_enable_EX_MEM),
     .writeback_mux_sel_EX_MEM(writeback_mux_sel_EX_MEM),
     .regfile_write_enable_EX_MEM(regfile_write_enable_EX_MEM),
-    .regfile_write_address_EX_MEM(regfile_write_address_EX_MEM)
+    .regfile_write_address_EX_MEM(regfile_write_address_EX_MEM),
+    .valid_EX_MEM(valid_EX_MEM)
 );
 
 StageMemory_Top MEMORY_STAGE(
@@ -211,13 +239,15 @@ StageMemory_Top MEMORY_STAGE(
     .writeback_mux_sel_EX_MEM(writeback_mux_sel_EX_MEM),
     .regfile_write_enable_EX_MEM(regfile_write_enable_EX_MEM),
     .regfile_write_address_EX_MEM(regfile_write_address_EX_MEM),
+    .valid_EX_MEM(valid_EX_MEM),
 
     .Instruction_address_MEM_WB(Instruction_address_MEM_WB),
     .alu_out_MEM_WB(alu_out_MEM_WB),
     .datamem_out_MEM_WB(datamem_out_MEM_WB),
     .writeback_mux_sel_MEM_WB(writeback_mux_sel_MEM_WB),
     .regfile_write_enable_MEM_WB(regfile_write_enable_MEM_WB),
-    .regfile_write_address_MEM_WB(regfile_write_address_MEM_WB)
+    .regfile_write_address_MEM_WB(regfile_write_address_MEM_WB),
+    .valid_MEM_WB(valid_MEM_WB)
 );
 
 StageWriteBack_Top WRITEBACK_STAGE(
