@@ -232,7 +232,7 @@ class RefISS:
             c = {0:a==b,1:a!=b,4:sx(a,32)<sx(b,32),5:sx(a,32)>=sx(b,32),6:a<b,7:a>=b}.get(f3)
             if c: npc = (self.pc + bimm) & M32
         elif op == 0x6F: w = self.pc + 4; npc = (self.pc + jimm) & M32
-        elif op == 0x67: w = self.pc + 4; npc = (a + iimm) & M32 & ~1
+        elif op == 0x67 and f3 == 0: w = self.pc + 4; npc = (a + iimm) & M32 & ~1
         elif op == 0x73 and f3 in (1, 2, 3, 5, 6, 7):                # Zicsr
             csr = (ins >> 20) & 0xFFF
             old = self.csr_read(csr)
@@ -334,6 +334,8 @@ def compare(src, tag, steps=600, cycles=1500, quiet=False, march=MARCH, plusargs
     with open(f"build/{tag}.ref.txt", "w") as f:      # consumed by model/c rv_iss tests
         for r in range(1, 32): f.write(f"x{r} {ref.x[r]:08x}\n")
         f.write(f"steps {steps}\nmemmap spec\n")
+    with open(f"build/{tag}.ref_trace.txt", "w") as f:  # RefISS RVVI records, same hex format as the RTL log
+        for t in ref.trace: f.write("%016x %08x %08x %02x %08x %08x %08x %x %x\n" % t)
     if not quiet:
         print(f"[{'PASS' if not diffs else 'FAIL'}] {tag}")
         for d in diffs[:8]: print("       ", d)

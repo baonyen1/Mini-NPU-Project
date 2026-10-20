@@ -56,6 +56,9 @@ results["bltu_bgeu_sign"] = not compare(
     "  bgeu x1, x2, B\n  addi x20, x20, 2\nB:\n"
     "  blt  x1, x2, C\n  addi x20, x20, 4\nC:\n"
     "  bgeu x0, x0, D\n  addi x20, x20, 8\nD:\n" + END, "bltu_bgeu_sign")
+# a JALR encoding with funct3 != 0 is not an instruction: it executes as a NOP (no jump, no link)
+results["jalr_funct3_is_nop"] = not compare(
+    "  li x1,0x100\n  .insn i 0x67, 1, x5, 0(x1)\n  addi x6,x0,7\n  .insn i 0x67, 7, x7, 0(x1)\n  addi x8,x0,9\n" + END, "jalr_funct3_is_nop")
 print("\nSUMMARY:", sum(results.values()), "/", len(results), "pass")
 print("FAIL:", [k for k,v in results.items() if not v])
 import json
