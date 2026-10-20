@@ -6,6 +6,10 @@ module ID_EX_Reg(
     stall,
     flush,
 
+    // operands as seen by EX (after forwarding); loaded back while the stage is held
+    held_operand_0,
+    held_operand_1,
+
     // data from Decode
     Instruction_address_IF_ID,
     regfile_out_0,
@@ -30,6 +34,7 @@ module ID_EX_Reg(
     writeback_mux_sel,
     csr_op,
     fence_i,
+    custom_ctl,
     valid,
 
     // data to Execute
@@ -56,10 +61,18 @@ module ID_EX_Reg(
     writeback_mux_sel_ID_EX,
     csr_op_ID_EX,
     fence_i_ID_EX,
+    custom_ctl_ID_EX,
     valid_ID_EX
 );
 
 input clk, reset, stall, flush;
+
+// While EX is held (stall), the forwarding sources of the instruction in EX can leave the
+// pipeline (an older instruction retires). The value EX sees is therefore captured into the
+// operand registers every held cycle, so the instruction still has the right operands when it
+// finally advances.
+input [31:0] held_operand_0;
+input [31:0] held_operand_1;
 
 input [31:0] Instruction_address_IF_ID;
 input [31:0] regfile_out_0;
@@ -84,6 +97,7 @@ input regfile_write_enable;
 input [1:0] writeback_mux_sel;
 input [2:0] csr_op;
 input fence_i;
+input [4:0] custom_ctl;
 input valid;
 
 output reg [31:0] Instruction_address_ID_EX;
@@ -109,6 +123,7 @@ output reg regfile_write_enable_ID_EX;
 output reg [1:0] writeback_mux_sel_ID_EX;
 output reg [2:0] csr_op_ID_EX;
 output reg fence_i_ID_EX;
+output reg [4:0] custom_ctl_ID_EX;
 output reg valid_ID_EX;
 
 always @(posedge clk) begin
@@ -136,6 +151,7 @@ always @(posedge clk) begin
         writeback_mux_sel_ID_EX     <= 2'b00;
         csr_op_ID_EX                <= 3'b000;
         fence_i_ID_EX               <= 1'b0;
+        custom_ctl_ID_EX            <= 5'b00000;
         valid_ID_EX                 <= 1'b0;
     end
     else if (flush) begin
@@ -162,9 +178,14 @@ always @(posedge clk) begin
         writeback_mux_sel_ID_EX     <= 2'b00;
         csr_op_ID_EX                <= 3'b000;
         fence_i_ID_EX               <= 1'b0;
+        custom_ctl_ID_EX            <= 5'b00000;
         valid_ID_EX                 <= 1'b0;
     end
-    else if (!stall) begin
+    else if (stall) begin
+        regfile_out_0_ID_EX       <= held_operand_0;
+        regfile_out_1_ID_EX       <= held_operand_1;
+    end
+    else begin
         Instruction_address_ID_EX <= Instruction_address_IF_ID;
         regfile_out_0_ID_EX       <= regfile_out_0;
         regfile_out_1_ID_EX       <= regfile_out_1;
@@ -188,6 +209,7 @@ always @(posedge clk) begin
         writeback_mux_sel_ID_EX     <= writeback_mux_sel;
         csr_op_ID_EX                <= csr_op;
         fence_i_ID_EX               <= fence_i;
+        custom_ctl_ID_EX            <= custom_ctl;
         valid_ID_EX                 <= valid;
     end
 end

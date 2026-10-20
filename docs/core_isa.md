@@ -9,7 +9,7 @@ Spec: `docs/superpowers/specs/2026-10-04-mini-npu-design.md` §5–§6.
 | M (`mul*`, `div*`, `rem*`) | ✅ implemented, regression green (2026-10-20) | 5 |
 | Zicsr + counters, `npu_status`/`npu_busy_cyc` | ✅ implemented, regression green (2026-10-20) | 6 |
 | Zifencei, Zbb | ✅ implemented, regression green (2026-10-20) | 7 |
-| custom-0 (LOAD_WEIGHT, LOAD_INPUT, COMPUTE, READ_RESULT) | ⬜ planned | 9 |
+| custom-0 (LOAD_WEIGHT, LOAD_INPUT, COMPUTE, READ_RESULT) | ✅ implemented against the engine stub, regression green (2026-10-20) | 9 |
 
 ## 1. Implemented instructions (RV32I)
 
@@ -81,6 +81,15 @@ The `ALU op` column is the 4-bit `alu_operation` that `Control.v` sends to `ALU.
 | 5 | `cpop` | 11 | `sext.h` | | |
 
 - **Decode** needs more than `funct3`/`funct7` for the unary operations: `Control.v` now also receives the `rs2` field (`instruction[24:20]`). `zext.h` requires `rs2 = x0` (it is `pack rd, rs1, x0`; `pack` with another `rs2` is not Zbb and executes as a NOP). `slli` keeps `funct7 = 0000000`; `funct7 = 0110000` on funct3 001 selects `clz ctz cpop sext.b sext.h` by `rs2`.
+
+### 2.4 custom-0 push and READ_RESULT (Task 9)
+
+- **Decode.** Opcode `0001011`. `Control` raises `custom_ctl = {1, funct7[0], funct3}` and sends `alu_operation = ADD` with `ALUSrc = 1`; `ImmGenerator` returns 0 for this opcode, so `rs1` leaves EX as the ALU result and `rs2` as the store-data value. Only READ_RESULT (funct3 = 011) writes `rd` (writeback select 01, like a load). `rd` is ignored for the other funct3 values even when it is not `x0`.
+- **Push in MEM** (`StageMemory_Top`). `cmd_valid` is high for LOAD_WEIGHT, LOAD_INPUT, COMPUTE and the reserved funct3 values `100`-`111` (op `ILLEGAL` = 3). `cmd_op` = funct3 for 000/001/010. LOAD commands carry `cmd_addr = rs1`, `cmd_k = rs2`; COMPUTE carries `cmd_k = rs1`, `cmd_addr = 0` and `cmd_clr = funct7[0]` (`cmd_clr` is 0 for every other op). `cmd_valid` and the operands stay unchanged until `cmd_ready`; the stub checks this. Because the push is in MEM, every older store has written the DTCM first.
+- **READ_RESULT.** `rd_req` is raised in MEM with `rd_idx = rs1[3:0]` (upper bits ignored) and the instruction waits for `rd_ready`. `rd_data` is captured into MEM/WB (`rd_data_MEM_WB`) and reaches the register file and the forwarding network through the load-data path. It also joins the load-use detector (a consumer right behind it waits one cycle), and `rd = x0` still waits and drains (the wait does not depend on `rd`).
+- **Stall.** `mem_busy = (push and !cmd_ready) or (READ_RESULT and !rd_ready)` joins the stall vector (`docs/core_stall.md`): PC, IF/ID, ID/EX and EX/MEM hold, MEM/WB takes a bubble.
+- **Held EX.** While EX is held, an older instruction can leave the pipeline and with it the forwarding source of the instruction in EX. `ID_EX_Reg` therefore reloads its operand registers with the value EX sees (`held_operand_0/1`) in every held cycle. A CSR instruction held in EX writes only in the cycle it leaves (`ex_advance`), so it writes once and returns the old value.
+- **Stub.** `rtl/top/npu_stub.sv` models the engine: `+STUB_READY=<bits>` and `+STUB_RDREADY=<bits>` give `cmd_ready` / `rd_ready` patterns (character *i* applies in cycle *i* mod length), `rd_data = {28'b0, rd_idx}`, every accepted push prints `PUSH op addr k clr`, and `STUB_ERROR` is printed when `cmd_valid` / `rd_req` drops or changes before the handshake.
 
 ## 3. Internal control encodings
 

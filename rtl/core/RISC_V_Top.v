@@ -17,7 +17,19 @@ module RISC_V_Top(
     csr_we,
     csr_addr,
     csr_wdata,
-    csr_rdata
+    csr_rdata,
+
+    // engine command / result port (spec 7.1)
+    cmd_valid,
+    cmd_ready,
+    cmd_op,
+    cmd_addr,
+    cmd_k,
+    cmd_clr,
+    rd_req,
+    rd_idx,
+    rd_ready,
+    rd_data
 );
 
 input clk, reset;
@@ -35,6 +47,17 @@ output csr_we;
 output [11:0] csr_addr;
 output [31:0] csr_wdata;
 input [31:0] csr_rdata;
+
+output cmd_valid;
+input cmd_ready;
+output [1:0] cmd_op;
+output [31:0] cmd_addr;
+output [31:0] cmd_k;
+output cmd_clr;
+output rd_req;
+output [3:0] rd_idx;
+input rd_ready;
+input [31:0] rd_data;
 
 wire [31:0] jump_branch_destination;
 
@@ -58,6 +81,11 @@ wire regfile_write_enable_ID_EX;
 wire [1:0] writeback_mux_sel_ID_EX;
 wire [2:0] csr_op_ID_EX;
 wire fence_i_ID_EX;
+wire [4:0] custom_ctl_ID_EX, custom_ctl_EX_MEM;
+wire mem_busy;
+wire hazard_ex_mem_stall;
+wire hazard_mem_wb_bubble;
+wire load_like_ID_EX;
 wire valid_IF_ID, valid_ID_EX, valid_EX_MEM, valid_MEM_WB;
 
 wire [31:0] datamem_wr_data_EX_MEM;
@@ -86,6 +114,7 @@ wire hazard_id_ex_stall;
 wire hazard_id_ex_flush;
 wire hazard_ex_mem_bubble;
 wire div_busy;
+wire [31:0] operand_0_ex, operand_1_ex;
 wire [2:0] fw_mux_0_sel;
 wire [2:0] fw_mux_1_sel;
 
@@ -95,7 +124,7 @@ Hazard_Unit HAZARD_UNIT(
     .funct3_IF_ID(Instruction_IF_ID[14:12]),
     .regfile_read_address_0_IF_ID(Instruction_IF_ID[19:15]),
     .regfile_read_address_1_IF_ID(Instruction_IF_ID[24:20]),
-    .datamem_read_enable_ID_EX(datamem_read_enable_ID_EX),
+    .datamem_read_enable_ID_EX(load_like_ID_EX),
     .regfile_write_address_ID_EX(regfile_write_address_ID_EX),
     .regfile_read_address_0_ID_EX(regfile_read_address_0_ID_EX),
     .regfile_read_address_1_ID_EX(regfile_read_address_1_ID_EX),
@@ -106,16 +135,23 @@ Hazard_Unit HAZARD_UNIT(
     .regfile_write_enable_MEM_WB(regfile_write_enable_MEM_WB),
     .writeback_mux_sel_MEM_WB(writeback_mux_sel_MEM_WB),
     .div_busy(div_busy),
+    .mem_busy(mem_busy),
     .pc_write(hazard_pc_write),
     .if_id_stall(hazard_if_id_stall),
     .if_id_flush(hazard_if_id_flush),
     .id_ex_stall(hazard_id_ex_stall),
     .id_ex_flush(hazard_id_ex_flush),
+    .ex_mem_stall(hazard_ex_mem_stall),
     .ex_mem_bubble(hazard_ex_mem_bubble),
+    .mem_wb_bubble(hazard_mem_wb_bubble),
     .fw_mux_0_sel(fw_mux_0_sel),
     .fw_mux_1_sel(fw_mux_1_sel),
     .load_use_stall(load_use_stall)
 );
+
+// READ_RESULT returns its data in WB like a load, so it joins the load-use detector
+assign load_like_ID_EX = datamem_read_enable_ID_EX |
+                         (custom_ctl_ID_EX[4] & (custom_ctl_ID_EX[2:0] == 3'b011));
 
 StageIF_TOP IF_STAGE(
     .clk(clk),
@@ -136,6 +172,8 @@ StageDecode_Top DECODE_STAGE(
     .reset(reset),
     .stall(hazard_id_ex_stall),
     .flush(hazard_id_ex_flush),
+    .held_operand_0(operand_0_ex),
+    .held_operand_1(operand_1_ex),
 
     .Instruction_IF_ID(Instruction_IF_ID),
     .Instruction_address_IF_ID(Instruction_address_IF_ID),
@@ -167,6 +205,7 @@ StageDecode_Top DECODE_STAGE(
     .writeback_mux_sel_ID_EX(writeback_mux_sel_ID_EX),
     .csr_op_ID_EX(csr_op_ID_EX),
     .fence_i_ID_EX(fence_i_ID_EX),
+    .custom_ctl_ID_EX(custom_ctl_ID_EX),
     .valid_ID_EX(valid_ID_EX)
 );
 
@@ -193,6 +232,7 @@ StageExecute_Top EXECUTE_STAGE(
     .writeback_mux_sel_ID_EX(writeback_mux_sel_ID_EX),
     .csr_op_ID_EX(csr_op_ID_EX),
     .fence_i_ID_EX(fence_i_ID_EX),
+    .custom_ctl_ID_EX(custom_ctl_ID_EX),
     .regfile_read_address_0_ID_EX(regfile_read_address_0_ID_EX),
     .valid_ID_EX(valid_ID_EX),
 
@@ -202,8 +242,10 @@ StageExecute_Top EXECUTE_STAGE(
     .csr_rdata(csr_rdata),
     .valid_MEM_WB(valid_MEM_WB),
 
+    .operand_0_ex(operand_0_ex),
+    .operand_1_ex(operand_1_ex),
     .ex_stall(hazard_id_ex_stall),
-    .ex_mem_stall(1'b0),
+    .ex_mem_stall(hazard_ex_mem_stall),
     .ex_mem_bubble(hazard_ex_mem_bubble),
     .div_busy(div_busy),
 
@@ -226,7 +268,8 @@ StageExecute_Top EXECUTE_STAGE(
     .writeback_mux_sel_EX_MEM(writeback_mux_sel_EX_MEM),
     .regfile_write_enable_EX_MEM(regfile_write_enable_EX_MEM),
     .regfile_write_address_EX_MEM(regfile_write_address_EX_MEM),
-    .valid_EX_MEM(valid_EX_MEM)
+    .valid_EX_MEM(valid_EX_MEM),
+    .custom_ctl_EX_MEM(custom_ctl_EX_MEM)
 );
 
 StageMemory_Top MEMORY_STAGE(
@@ -243,6 +286,19 @@ StageMemory_Top MEMORY_STAGE(
     .regfile_write_enable_EX_MEM(regfile_write_enable_EX_MEM),
     .regfile_write_address_EX_MEM(regfile_write_address_EX_MEM),
     .valid_EX_MEM(valid_EX_MEM),
+    .custom_ctl_EX_MEM(custom_ctl_EX_MEM),
+
+    .cmd_valid(cmd_valid),
+    .cmd_ready(cmd_ready),
+    .cmd_op(cmd_op),
+    .cmd_addr(cmd_addr),
+    .cmd_k(cmd_k),
+    .cmd_clr(cmd_clr),
+    .rd_req(rd_req),
+    .rd_idx(rd_idx),
+    .rd_ready(rd_ready),
+    .rd_data(rd_data),
+    .mem_busy(mem_busy),
 
     .Instruction_address_MEM_WB(Instruction_address_MEM_WB),
     .alu_out_MEM_WB(alu_out_MEM_WB),

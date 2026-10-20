@@ -269,6 +269,7 @@ def run_rtl(prog, cycles, plusargs=()):
     st["_stdout"] = cp.stdout
     st["_push"] = [tuple(int(t, 16) for t in l.split()[1:5])
                    for l in cp.stdout.splitlines() if l.startswith("PUSH ")]
+    st["_errors"] = [l for l in cp.stdout.splitlines() if l.startswith("STUB_ERROR")]
     return st
 
 def compare(src, tag, steps=600, cycles=1500, quiet=False, march=MARCH, plusargs=()):
@@ -286,6 +287,7 @@ def compare(src, tag, steps=600, cycles=1500, quiet=False, march=MARCH, plusargs
             diffs.append(f"mem[{m*4:#05x}]: rtl={rtl[f'm{m}']:08x} ref={ref.mem[m]:08x}")
     if rtl["_push"] != ref.cmd_log:
         diffs.append(f"cmd_log: rtl={rtl['_push']} ref={ref.cmd_log}")
+    diffs += rtl["_errors"]                      # engine-stub protocol violations
     with open(f"build/{tag}.ref.txt", "w") as f:      # consumed by model/c rv_iss tests
         for r in range(1, 32): f.write(f"x{r} {ref.x[r]:08x}\n")
         f.write(f"steps {steps}\nmemmap {MEMMAP}\n")
@@ -294,13 +296,18 @@ def compare(src, tag, steps=600, cycles=1500, quiet=False, march=MARCH, plusargs
         for d in diffs[:8]: print("       ", d)
     return diffs
 
-def check_rtl(src, tag, expect, cycles=1500, quiet=False, march=MARCH, plusargs=()):
+def check_rtl(src, tag, expect, cycles=1500, quiet=False, march=MARCH, plusargs=(), stdout_has=()):
     """RTL-only check for timing properties RefISS cannot model (it is cycle-free).
-    `expect` maps register numbers to the values they must hold at the end.
+    `expect` maps register numbers to the values they must hold at the end;
+    `stdout_has` lists lines (prefix match) the simulation must have printed.
     Returns the list of differences (empty = pass)."""
     prog = assemble(src, tag, march)
     rtl = run_rtl(prog, cycles, plusargs)
     diffs = [f"x{r}: rtl={rtl[f'x{r}']:08x} want={v:08x}" for r, v in expect.items() if rtl[f"x{r}"] != v]
+    diffs += rtl["_errors"]
+    for want in stdout_has:
+        if not any(l.startswith(want) for l in rtl["_stdout"].splitlines()):
+            diffs.append(f"stdout lacks line starting with {want!r}")
     if not quiet:
         print(f"[{'PASS' if not diffs else 'FAIL'}] {tag}")
         for d in diffs[:8]: print("       ", d)

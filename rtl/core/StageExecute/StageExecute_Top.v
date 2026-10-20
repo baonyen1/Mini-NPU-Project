@@ -24,6 +24,7 @@ module StageExecute_Top(
     writeback_mux_sel_ID_EX,
     csr_op_ID_EX,
     fence_i_ID_EX,
+    custom_ctl_ID_EX,
     regfile_read_address_0_ID_EX,
     valid_ID_EX,
 
@@ -32,6 +33,8 @@ module StageExecute_Top(
     ex_mem_stall,
     ex_mem_bubble,
     div_busy,
+    operand_0_ex,
+    operand_1_ex,
 
     // engine CSR port (spec 7.1)
     csr_we,
@@ -64,7 +67,8 @@ module StageExecute_Top(
     writeback_mux_sel_EX_MEM,
     regfile_write_enable_EX_MEM,
     regfile_write_address_EX_MEM,
-    valid_EX_MEM
+    valid_EX_MEM,
+    custom_ctl_EX_MEM
 );
 
 input clk, reset;
@@ -88,6 +92,7 @@ input regfile_write_enable_ID_EX;
 input [1:0] writeback_mux_sel_ID_EX;
 input [2:0] csr_op_ID_EX;
 input fence_i_ID_EX;
+input [4:0] custom_ctl_ID_EX;
 input [4:0] regfile_read_address_0_ID_EX;
 input valid_ID_EX;
 
@@ -105,6 +110,8 @@ input [2:0] fw_mux_0_sel;
 input [2:0] fw_mux_1_sel;
 
 output div_busy;       // a divide/remainder is in EX and its result is not ready
+output [31:0] operand_0_ex;   // rs1 / rs2 values as EX sees them (after forwarding)
+output [31:0] operand_1_ex;
 output csr_we;
 output [11:0] csr_addr;
 output [31:0] csr_wdata;
@@ -123,10 +130,14 @@ output [1:0] writeback_mux_sel_EX_MEM;
 output regfile_write_enable_EX_MEM;
 output [4:0] regfile_write_address_EX_MEM;
 output valid_EX_MEM;
+output [4:0] custom_ctl_EX_MEM;
 
 wire [31:0] fw_mux_0_output;
 wire [31:0] fw_mux_1_output;
 wire [31:0] alu_input_a;
+
+assign operand_0_ex = fw_mux_0_output;
+assign operand_1_ex = fw_mux_1_output;
 wire [31:0] mux_1_output;
 wire [31:0] alu_output;
 wire [31:0] ex_result;
@@ -242,6 +253,7 @@ CSR_Unit CSR(
     .csr_addr(immediate_ID_EX[11:0]),
     .wdata(csr_operand),
     .rs1_nonzero(regfile_read_address_0_ID_EX != 5'b00000),
+    .ex_advance(~ex_stall),
     .rdata(csr_value),
     .retire(valid_MEM_WB),
     .older_in_flight(older_in_flight),
@@ -302,6 +314,7 @@ EX_MEM_Reg EX_MEM(
     .regfile_write_enable_ID_EX(regfile_write_enable_ID_EX),
     .regfile_write_address_ID_EX(regfile_write_address_ID_EX),
     .valid_ID_EX(valid_ID_EX),
+    .custom_ctl_ID_EX(custom_ctl_ID_EX),
 
     .Instruction_address_EX_MEM(Instruction_address_EX_MEM),
     .alu_out_EX_MEM(alu_out_EX_MEM),
@@ -312,7 +325,8 @@ EX_MEM_Reg EX_MEM(
     .writeback_mux_sel_EX_MEM(writeback_mux_sel_EX_MEM),
     .regfile_write_enable_EX_MEM(regfile_write_enable_EX_MEM),
     .regfile_write_address_EX_MEM(regfile_write_address_EX_MEM),
-    .valid_EX_MEM(valid_EX_MEM)
+    .valid_EX_MEM(valid_EX_MEM),
+    .custom_ctl_EX_MEM(custom_ctl_EX_MEM)
 );
 
 endmodule

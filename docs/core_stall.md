@@ -1,6 +1,6 @@
 # Pipeline stall and flush design — `rtl/core`
 
-Status: **load-use and divider stalls are in RTL** (Task 5, 2026-10-20: `Hazard_Unit.v` builds the stall vector with `stall_mem` tied off). The FIFO-full and READ_RESULT rows are implemented in plan Task 9.
+Status: **all four stall sources are in RTL** (load-use and divider in Task 5, FIFO-full and READ_RESULT wait in Task 9, 2026-10-20). `Hazard_Unit.v` builds the stall vector of section 3.
 Chosen approach: **A — per-stage stall vector computed centrally in `Hazard_Unit.v`** (alternatives B "valid/ready elastic pipeline" and C "global freeze" were rejected: B rewrites every pipeline register in the busiest weeks; C freezes older instructions for no reason and is the old `cpu_en` idea).
 
 ## 1. Principle
@@ -59,6 +59,10 @@ Without the EX/MEM bubble, D would be copied into MEM every cycle and retire abo
 4. **Retire accounting needs a `valid` bit** in every pipeline register. Bubbles carry `valid = 0`; only `valid = 1` at WB counts for `minstret` and the RVVI trace.
 5. Why a MEM stall bubbles **MEM/WB** but not **EX/MEM**: the instruction in MEM is the one being held, so EX/MEM must keep it (hold), while WB must not retire it a second time (bubble). Bubbling EX/MEM instead would erase the waiting instruction.
 
+6. **A held EX stage loses its forwarding sources.** When MEM stalls, the instruction in EX is held for many cycles, and the older instruction that was forwarding a value to it leaves WB after one cycle. The operand registers in ID/EX still contain the value read in ID (stale). Fix (Task 9): while ID/EX is held it reloads its operand registers with the value EX sees (`held_operand_*`). Tests `mem_stall_stale_operand`, `mem_stall_stale_operand_push` (they failed before the fix: `x8 = 0` instead of 14).
+7. **Side effects of the instruction in EX happen when it leaves EX.** A CSR instruction held behind a waiting READ_RESULT must write once; writing every held cycle also changes the value it reads (`CSR_Unit.ex_advance`). Test `csr_write_once_under_mem_stall`. The divider has the same issue and solves it with `div_started`.
+8. **`EX_MEM_Reg` gives `stall` priority over `bubble`.** The `& !stall_mem` in the bubble equation is therefore redundant in this implementation; it stays in the equation for clarity.
+
 ## 6. Tests that pin this design (plan Review Focus 1)
 
 | Test | Task | Checks |
@@ -69,3 +73,6 @@ Without the EX/MEM bubble, D would be copied into MEM every cycle and retire abo
 | `push_in_branch_shadow` | 9 | a custom-0 push after a taken branch is never issued |
 | `read_result_x0_still_drains` | 9 | READ_RESULT to x0 still waits for the engine |
 | `rvvi_order_monotonic` | 8 | exactly one retire per instruction, no gaps after stalls/flushes |
+| `minstret_across_divide`, `custom_minstret_exact` | 6, 9 | the retire count is exact across divider and engine stalls (a missing bubble would count an instruction twice) |
+| `overlap_*` (7 tests) | 9 | branch / jump held behind a waiting READ_RESULT or push, load-use behind READ_RESULT, divide behind a push, divide in a branch shadow while MEM waits |
+| `randcustom_*` | 9 | 200 random programs mixing custom-0, M, loads, stores, branches with random ready patterns |

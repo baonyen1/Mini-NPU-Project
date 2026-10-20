@@ -19,7 +19,8 @@ module Controller(
     regfile_write_enable,
     regfile_write_address,
     csr_op,
-    fence_i
+    fence_i,
+    custom_ctl
 );
 
 input [31:0] Instruction_IF_ID;
@@ -42,6 +43,7 @@ output regfile_write_enable;
 output [4:0] regfile_write_address;
 output [2:0] csr_op;
 output fence_i;
+output [4:0] custom_ctl;
 
 wire [6:0] opcode;
 wire [2:0] fun3;
@@ -75,7 +77,8 @@ Control_Unit CONTROL_LOGIC(
     .DataFormat(data_format),
     .WB_sel(writeback_mux_sel),
     .csr_op(csr_op),
-    .FenceI(fence_i)
+    .FenceI(fence_i),
+    .custom_ctl(custom_ctl)
 );
 
 ImmGenerator IMMEDIATE_GENERATOR(

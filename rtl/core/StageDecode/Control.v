@@ -18,7 +18,8 @@ module Control_Unit (
     DataFormat,
     WB_sel,
     csr_op,
-    FenceI
+    FenceI,
+    custom_ctl
 );
 
 input [6:0] Opcode;
@@ -39,6 +40,7 @@ output reg [1:0] WB_sel;
 output reg [2:0] alu_branch_control;
 output reg [2:0] csr_op;   // funct3 of a CSR instruction, 000 for everything else
 output reg FenceI;         // fence.i: flush the pipeline and refetch from PC+4
+output reg [4:0] custom_ctl; // custom-0: [4] = custom instruction, [3] = clr (funct7[0]), [2:0] = funct3
 output reg [5:0] alu_operation;
 
 localparam ALU_AND = 6'b000000;
@@ -113,6 +115,7 @@ always @(*) begin
     alu_operation      = ALU_ADD;
     csr_op             = 3'b000;
     FenceI             = 1'b0;
+    custom_ctl         = 5'b00000;
 
     case (Opcode)
         7'b0110011: begin // R-type: ADD SUB SLL SLT SLTU XOR SRL SRA OR AND, and RV32M
@@ -320,6 +323,18 @@ always @(*) begin
             JumpTargetSel = 1'b0;
             reg_write     = 1'b1;
             WB_sel        = 2'b10;
+        end
+
+        7'b0001011: begin // custom-0: LOAD_WEIGHT LOAD_INPUT COMPUTE READ_RESULT (and reserved funct3 -> ILLEGAL push)
+            // rs1 reaches MEM as the ALU result (rs1 + 0: ImmGenerator returns 0 for this opcode)
+            // and rs2 as the store-data path; the command is pushed from MEM (plan Task 9).
+            custom_ctl    = {1'b1, fun7[0], fun3};
+            ALUSrc        = 1'b1;
+            alu_operation = ALU_ADD;
+            if (fun3 == 3'b011) begin // READ_RESULT behaves like a load: it writes rd in WB
+                reg_write = 1'b1;
+                WB_sel    = 2'b01;
+            end
         end
 
         7'b0001111: begin // MISC-MEM: fence executes as a NOP, fence.i flushes and refetches

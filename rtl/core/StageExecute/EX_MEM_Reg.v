@@ -16,6 +16,7 @@ module EX_MEM_Reg(
     regfile_write_enable_ID_EX,
     regfile_write_address_ID_EX,
     valid_ID_EX,
+    custom_ctl_ID_EX,
 
     Instruction_address_EX_MEM,
     alu_out_EX_MEM,
@@ -26,7 +27,8 @@ module EX_MEM_Reg(
     writeback_mux_sel_EX_MEM,
     regfile_write_enable_EX_MEM,
     regfile_write_address_EX_MEM,
-    valid_EX_MEM
+    valid_EX_MEM,
+    custom_ctl_EX_MEM
 );
 
 input clk, reset;
@@ -43,6 +45,7 @@ input [1:0] writeback_mux_sel_ID_EX;
 input regfile_write_enable_ID_EX;
 input [4:0] regfile_write_address_ID_EX;
 input valid_ID_EX;
+input [4:0] custom_ctl_ID_EX;
 
 output reg [31:0] Instruction_address_EX_MEM;
 output reg [31:0] alu_out_EX_MEM;
@@ -54,6 +57,7 @@ output reg [1:0] writeback_mux_sel_EX_MEM;
 output reg regfile_write_enable_EX_MEM;
 output reg [4:0] regfile_write_address_EX_MEM;
 output reg valid_EX_MEM;
+output reg [4:0] custom_ctl_EX_MEM;
 
 always @(posedge clk) begin
     if (reset) begin
@@ -67,6 +71,7 @@ always @(posedge clk) begin
         regfile_write_enable_EX_MEM <= 1'b0;
         regfile_write_address_EX_MEM <= 5'b0;
         valid_EX_MEM               <= 1'b0;
+        custom_ctl_EX_MEM          <= 5'b00000;
     end
     else if (stall) begin
         // hold
@@ -82,6 +87,7 @@ always @(posedge clk) begin
         regfile_write_enable_EX_MEM <= 1'b0;
         regfile_write_address_EX_MEM <= 5'b0;
         valid_EX_MEM               <= 1'b0;
+        custom_ctl_EX_MEM          <= 5'b00000;
     end
     else begin
         Instruction_address_EX_MEM <= Instruction_address_ID_EX;
@@ -94,6 +100,7 @@ always @(posedge clk) begin
         regfile_write_enable_EX_MEM <= regfile_write_enable_ID_EX;
         regfile_write_address_EX_MEM <= regfile_write_address_ID_EX;
         valid_EX_MEM               <= valid_ID_EX;
+        custom_ctl_EX_MEM          <= custom_ctl_ID_EX;
     end
 end
 

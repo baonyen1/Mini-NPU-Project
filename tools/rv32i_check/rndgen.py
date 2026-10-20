@@ -15,9 +15,10 @@ BASE_SH = ["slli", "srli", "srai"]
 DIV_OPS = ("div", "divu", "rem", "remu")
 END = "\nend: j end\n"
 
-def rnd_prog(rng, n=60, extra_r=(), extra_un=(), extra_sh=()):
+def rnd_prog(rng, n=60, extra_r=(), extra_un=(), extra_sh=(), extra_gen=None, extra_p=0.0):
     """extra_r: R-type mnemonics (rd,rs1,rs2); extra_un: unary mnemonics (rd,rs1);
-    extra_sh: immediate-shift mnemonics (rd,rs1,shamt)."""
+    extra_sh: immediate-shift mnemonics (rd,rs1,shamt).
+    extra_gen(rng, regs) -> one instruction line, emitted with probability extra_p."""
     regs = list(range(1, 8))
     L = [f" li x31,DM+0x200"]
     for r in regs:
@@ -25,6 +26,9 @@ def rnd_prog(rng, n=60, extra_r=(), extra_un=(), extra_sh=()):
     lab = 0
     r_all = BASE_R + list(extra_r) * 3            # extra ops are favoured
     for _ in range(n):
+        if extra_gen is not None and rng.random() < extra_p:
+            L.append(extra_gen(rng, regs))
+            continue
         r = rng.random(); d = rng.choice(regs); a = rng.choice(regs + [0]); b = rng.choice(regs + [0])
         if r < 0.33: L.append(f" {rng.choice(r_all)} x{d},x{a},x{b}")
         elif r < 0.43: L.append(f" {rng.choice(BASE_I)} x{d},x{a},{rng.randint(-2048, 2047)}")

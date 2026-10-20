@@ -14,6 +14,8 @@
 //   [1:0] = 01 CSRRW, 10 CSRRS, 11 CSRRC; [2] = 1 means wdata is a zimm.
 // A CSR instruction executes in one cycle in EX and an instruction in EX is
 // never on a wrong path, so the write may happen at the end of that cycle.
+// If EX is held (MEM waits for the engine) the write is delayed to the cycle in
+// which the instruction leaves, so it happens once and the read value is the old one.
 //
 // minstret is exact: the value read is the number of instructions older than
 // the reader. Retired ones are in `minstret`; the ones still in MEM and WB are
@@ -28,6 +30,7 @@ module CSR_Unit(
     csr_addr,
     wdata,
     rs1_nonzero,
+    ex_advance,
     rdata,
     retire,
     older_in_flight,
@@ -42,6 +45,7 @@ input [2:0] csr_op;
 input [11:0] csr_addr;
 input [31:0] wdata;          // rs1 value, or zimm for the immediate forms
 input rs1_nonzero;           // rs1/zimm field is not x0/0: CSRRS/CSRRC then write
+input ex_advance;            // the instruction leaves EX this cycle (a held CSR instruction must write once)
 input retire;                // one instruction leaves WB this cycle
 input [1:0] older_in_flight; // valid instructions in MEM and WB
 
@@ -83,7 +87,7 @@ always @(*) begin
     endcase
 end
 
-wire do_write = csr_en && ((csr_op[1:0] == 2'b01) || rs1_nonzero);
+wire do_write = csr_en && ex_advance && ((csr_op[1:0] == 2'b01) || rs1_nonzero);
 
 assign npu_csr_we    = do_write && is_npu_csr;
 assign npu_csr_addr  = csr_addr;

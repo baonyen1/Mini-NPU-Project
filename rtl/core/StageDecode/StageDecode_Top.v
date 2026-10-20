@@ -5,6 +5,8 @@ module StageDecode_Top(
     reset,
     stall,
     flush,
+    held_operand_0,
+    held_operand_1,
 
     // input from IF/ID
     Instruction_IF_ID,
@@ -39,10 +41,13 @@ module StageDecode_Top(
     writeback_mux_sel_ID_EX,
     csr_op_ID_EX,
     fence_i_ID_EX,
+    custom_ctl_ID_EX,
     valid_ID_EX
 );
 
 input clk, reset, stall, flush;
+input [31:0] held_operand_0;
+input [31:0] held_operand_1;
 
 input [31:0] Instruction_IF_ID;
 input [31:0] Instruction_address_IF_ID;
@@ -75,6 +80,7 @@ output regfile_write_enable_ID_EX;
 output [1:0] writeback_mux_sel_ID_EX;
 output [2:0] csr_op_ID_EX;
 output fence_i_ID_EX;
+output [4:0] custom_ctl_ID_EX;
 output valid_ID_EX;
 
 wire [4:0] regfile_write_address;
@@ -95,6 +101,7 @@ wire [5:0] alu_operation;
 wire [1:0] writeback_mux_sel;
 wire [2:0] csr_op;
 wire fence_i;
+wire [4:0] custom_ctl;
 
 wire [31:0] regfile_out_0;
 wire [31:0] regfile_out_1;
@@ -119,7 +126,8 @@ Controller CONTROLLER(
     .regfile_write_enable(regfile_write_enable),
     .regfile_write_address(regfile_write_address),
     .csr_op(csr_op),
-    .fence_i(fence_i)
+    .fence_i(fence_i),
+    .custom_ctl(custom_ctl)
 );
 
 Register_File REGFILE(
@@ -139,6 +147,8 @@ ID_EX_Reg ID_EX(
     .reset(reset),
     .stall(stall),
     .flush(flush),
+    .held_operand_0(held_operand_0),
+    .held_operand_1(held_operand_1),
 
     .Instruction_address_IF_ID(Instruction_address_IF_ID),
     .regfile_out_0(regfile_out_0),
@@ -162,6 +172,7 @@ ID_EX_Reg ID_EX(
     .writeback_mux_sel(writeback_mux_sel),
     .csr_op(csr_op),
     .fence_i(fence_i),
+    .custom_ctl(custom_ctl),
     .valid(valid_IF_ID),
 
     .Instruction_address_ID_EX(Instruction_address_ID_EX),
@@ -186,6 +197,7 @@ ID_EX_Reg ID_EX(
     .writeback_mux_sel_ID_EX(writeback_mux_sel_ID_EX),
     .csr_op_ID_EX(csr_op_ID_EX),
     .fence_i_ID_EX(fence_i_ID_EX),
+    .custom_ctl_ID_EX(custom_ctl_ID_EX),
     .valid_ID_EX(valid_ID_EX)
 );
 
