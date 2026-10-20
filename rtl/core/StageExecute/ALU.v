@@ -10,22 +10,22 @@ module ALU_Unit(
 );
 
 input [31:0] A, B;
-input [3:0] Control_in;
+input [5:0] Control_in;
 input [2:0] alu_branch_control;
 
 output reg [31:0] ALU_result;
 output alu_branch_response;
 
-localparam ALU_AND = 4'b0000;
-localparam ALU_OR  = 4'b0001;
-localparam ALU_ADD = 4'b0010;
-localparam ALU_XOR = 4'b0011;
-localparam ALU_SLL = 4'b0100;
-localparam ALU_SRL = 4'b0101;
-localparam ALU_SUB = 4'b0110;
-localparam ALU_SLT  = 4'b0111; // set if A <  B, signed   (slt, slti)
-localparam ALU_SLTU = 4'b1000; // set if A <  B, unsigned (sltu, sltiu)
-localparam ALU_SRA  = 4'b1001; // arithmetic right shift  (sra, srai)
+localparam ALU_AND = 6'b000000;
+localparam ALU_OR  = 6'b000001;
+localparam ALU_ADD = 6'b000010;
+localparam ALU_XOR = 6'b000011;
+localparam ALU_SLL = 6'b000100;
+localparam ALU_SRL = 6'b000101;
+localparam ALU_SUB = 6'b000110;
+localparam ALU_SLT  = 6'b000111; // set if A <  B, signed   (slt, slti)
+localparam ALU_SLTU = 6'b001000; // set if A <  B, unsigned (sltu, sltiu)
+localparam ALU_SRA  = 6'b001001; // arithmetic right shift  (sra, srai)
 
 always @(*) begin
     case (Control_in)

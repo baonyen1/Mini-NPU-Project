@@ -36,7 +36,7 @@ wire [4:0] regfile_write_address_ID_EX;
 wire jump_target_mux_sel_ID_EX;
 wire [1:0] alu_src_a_sel_ID_EX;
 wire mux_1_sel_ID_EX;
-wire [3:0] alu_operation_ID_EX;
+wire [5:0] alu_operation_ID_EX;
 wire alu_branch_ID_EX;
 wire [2:0] alu_branch_control_ID_EX;
 wire jump_flag_ID_EX;
@@ -70,6 +70,8 @@ wire hazard_if_id_stall;
 wire hazard_if_id_flush;
 wire hazard_id_ex_stall;
 wire hazard_id_ex_flush;
+wire hazard_ex_mem_bubble;
+wire div_busy;
 wire [2:0] fw_mux_0_sel;
 wire [2:0] fw_mux_1_sel;
 
@@ -88,11 +90,13 @@ Hazard_Unit HAZARD_UNIT(
     .regfile_write_address_MEM_WB(regfile_write_address_MEM_WB),
     .regfile_write_enable_MEM_WB(regfile_write_enable_MEM_WB),
     .writeback_mux_sel_MEM_WB(writeback_mux_sel_MEM_WB),
+    .div_busy(div_busy),
     .pc_write(hazard_pc_write),
     .if_id_stall(hazard_if_id_stall),
     .if_id_flush(hazard_if_id_flush),
     .id_ex_stall(hazard_id_ex_stall),
     .id_ex_flush(hazard_id_ex_flush),
+    .ex_mem_bubble(hazard_ex_mem_bubble),
     .fw_mux_0_sel(fw_mux_0_sel),
     .fw_mux_1_sel(fw_mux_1_sel),
     .load_use_stall(load_use_stall)
@@ -167,6 +171,11 @@ StageExecute_Top EXECUTE_STAGE(
     .datamem_write_enable_ID_EX(datamem_write_enable_ID_EX),
     .regfile_write_enable_ID_EX(regfile_write_enable_ID_EX),
     .writeback_mux_sel_ID_EX(writeback_mux_sel_ID_EX),
+
+    .ex_stall(hazard_id_ex_stall),
+    .ex_mem_stall(1'b0),
+    .ex_mem_bubble(hazard_ex_mem_bubble),
+    .div_busy(div_busy),
 
     .alu_out_MEM_WB(alu_out_MEM_WB),
     .datamem_out_MEM_WB(datamem_out_MEM_WB),

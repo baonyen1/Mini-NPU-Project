@@ -28,7 +28,7 @@ output [31:0] immediate;
 output jump_target_mux_sel;
 output [1:0] alu_src_a_sel;
 output mux_1_sel;
-output [3:0] alu_operation;
+output [5:0] alu_operation;
 output alu_branch;
 output [2:0] alu_branch_control;
 output jump_flag;

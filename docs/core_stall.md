@@ -1,6 +1,6 @@
 # Pipeline stall and flush design — `rtl/core`
 
-Status: **design**. Only the load-use stall exists in RTL today. The other rows are implemented in plan Task 5 (divider) and Task 9 (custom-0 push / READ_RESULT).
+Status: **load-use and divider stalls are in RTL** (Task 5, 2026-10-20: `Hazard_Unit.v` builds the stall vector with `stall_mem` tied off). The FIFO-full and READ_RESULT rows are implemented in plan Task 9.
 Chosen approach: **A — per-stage stall vector computed centrally in `Hazard_Unit.v`** (alternatives B "valid/ready elastic pipeline" and C "global freeze" were rejected: B rewrites every pipeline register in the busiest weeks; C freezes older instructions for no reason and is the old `cpu_en` idea).
 
 ## 1. Principle

@@ -33,18 +33,18 @@ output reg JumpTargetSel;
 output reg [2:0] DataFormat;
 output reg [1:0] WB_sel;
 output reg [2:0] alu_branch_control;
-output reg [3:0] alu_operation;
+output reg [5:0] alu_operation;
 
-localparam ALU_AND = 4'b0000;
-localparam ALU_OR  = 4'b0001;
-localparam ALU_ADD = 4'b0010;
-localparam ALU_XOR = 4'b0011;
-localparam ALU_SLL = 4'b0100;
-localparam ALU_SRL = 4'b0101;
-localparam ALU_SUB = 4'b0110;
-localparam ALU_SLT  = 4'b0111;
-localparam ALU_SLTU = 4'b1000;
-localparam ALU_SRA  = 4'b1001;
+localparam ALU_AND = 6'b000000;
+localparam ALU_OR  = 6'b000001;
+localparam ALU_ADD = 6'b000010;
+localparam ALU_XOR = 6'b000011;
+localparam ALU_SLL = 6'b000100;
+localparam ALU_SRL = 6'b000101;
+localparam ALU_SUB = 6'b000110;
+localparam ALU_SLT  = 6'b000111;
+localparam ALU_SLTU = 6'b001000;
+localparam ALU_SRA  = 6'b001001;
 
 always @(*) begin
     // Default NOP / unsupported instruction
@@ -62,8 +62,12 @@ always @(*) begin
     alu_operation      = ALU_ADD;
 
     case (Opcode)
-        7'b0110011: begin // R-type: ADD SUB SLL SLT SLTU XOR SRL SRA OR AND
-            case (fun3)
+        7'b0110011: begin // R-type: ADD SUB SLL SLT SLTU XOR SRL SRA OR AND, and RV32M
+            if (fun7 == 7'b0000001) begin // MUL MULH MULHSU MULHU DIV DIVU REM REMU
+                reg_write     = 1'b1;
+                alu_operation = {3'b010, fun3}; // [5:4] = 01 selects the M unit, [2:0] = funct3
+            end
+            else case (fun3)
                 3'b000: begin
                     if (fun7 == 7'b0000000) begin
                         reg_write     = 1'b1;

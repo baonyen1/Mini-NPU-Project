@@ -59,7 +59,7 @@ output [4:0] regfile_write_address_ID_EX;
 output jump_target_mux_sel_ID_EX;
 output [1:0] alu_src_a_sel_ID_EX;
 output mux_1_sel_ID_EX;
-output [3:0] alu_operation_ID_EX;
+output [5:0] alu_operation_ID_EX;
 output alu_branch_ID_EX;
 output [2:0] alu_branch_control_ID_EX;
 output jump_flag_ID_EX;
@@ -83,7 +83,7 @@ wire mux_1_sel;
 wire regfile_write_enable;
 wire jump_flag;
 wire [2:0] data_format;
-wire [3:0] alu_operation;
+wire [5:0] alu_operation;
 wire [1:0] writeback_mux_sel;
 
 wire [31:0] regfile_out_0;

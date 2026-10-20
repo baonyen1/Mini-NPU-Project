@@ -3,6 +3,8 @@
 module EX_MEM_Reg(
     clk,
     reset,
+    stall,
+    bubble,
 
     Instruction_address_ID_EX,
     alu_output,
@@ -26,6 +28,8 @@ module EX_MEM_Reg(
 );
 
 input clk, reset;
+input stall;    // hold the instruction in MEM (an older-stage stall, not used before Task 9)
+input bubble;   // load a NOP: the instruction in EX is not ready to leave (divider busy)
 
 input [31:0] Instruction_address_ID_EX;
 input [31:0] alu_output;
@@ -49,6 +53,20 @@ output reg [4:0] regfile_write_address_EX_MEM;
 
 always @(posedge clk) begin
     if (reset) begin
+        Instruction_address_EX_MEM <= 32'b0;
+        alu_out_EX_MEM             <= 32'b0;
+        datamem_wr_data_EX_MEM     <= 32'b0;
+        data_format_EX_MEM         <= 3'b010;
+        datamem_read_enable_EX_MEM <= 1'b0;
+        datamem_write_enable_EX_MEM <= 1'b0;
+        writeback_mux_sel_EX_MEM   <= 2'b00;
+        regfile_write_enable_EX_MEM <= 1'b0;
+        regfile_write_address_EX_MEM <= 5'b0;
+    end
+    else if (stall) begin
+        // hold
+    end
+    else if (bubble) begin
         Instruction_address_EX_MEM <= 32'b0;
         alu_out_EX_MEM             <= 32'b0;
         datamem_wr_data_EX_MEM     <= 32'b0;

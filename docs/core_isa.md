@@ -6,7 +6,7 @@ Spec: `docs/superpowers/specs/2026-10-04-mini-npu-design.md` §5–§6.
 | Extension | Status | Plan task |
 |---|---|---|
 | RV32I (base, 40 instructions) | ✅ implemented, regression green | 3 |
-| M (`mul*`, `div*`, `rem*`) | ⬜ planned | 5 |
+| M (`mul*`, `div*`, `rem*`) | ✅ implemented, regression green (2026-10-20) | 5 |
 | Zicsr + counters, `npu_status`/`npu_busy_cyc` | ⬜ planned | 6 |
 | Zifencei, Zbb | ⬜ planned | 7 |
 | custom-0 (LOAD_WEIGHT, LOAD_INPUT, COMPUTE, READ_RESULT) | ⬜ planned | 9 |
@@ -50,11 +50,19 @@ The `ALU op` column is the 4-bit `alu_operation` that `Control.v` sends to `ALU.
 - **Branch decode** now accepts every funct3 except the two reserved values `010` and `011`.
 - Arithmetic shift in Verilog: `$signed(A) >>> B[4:0]`. Plain `>>` on an unsigned operand would fill with zeros (this is exactly the bug the mutation check in §5 injects).
 
+### 2.1 M extension (Task 5)
+
+- **Decode.** R-type with `funct7 = 0000001`; `Control.v` sends `{3'b010, funct3}` as `alu_operation`. All other `funct7` values on those `funct3` still decode as before.
+- **Multiplier** (`StageExecute/Multiplier.v`): one combinational signed 33 x 33 product. The extension bit of each operand is its sign bit when the operand is signed for that operation, else 0. `MUL` returns the low word, the other three the high word.
+- **Divider** (`StageExecute/Divider.v`): restoring, one quotient bit per cycle, absolute values with the signs fixed at the end. `DIV`/`REM` by zero return all ones / the dividend; `-2^31 / -1` returns `-2^31` / 0. Those two cases skip the loop (one stall cycle). A normal divide occupies EX for 34 cycles (1 start + 32 iterations + the cycle that hands over the result).
+- **Stall.** `div_busy = divide in EX and not done` freezes PC, IF/ID and ID/EX and loads a bubble into EX/MEM every cycle (`docs/core_stall.md` section 3). The divider samples its operands in the first EX cycle (`div_started` marks that this has happened), because the forwarding sources vanish while the instruction waits.
+- **Result.** The M result enters EX/MEM like an ALU result, so the normal forwarding path serves it.
+
 ## 3. Internal control encodings
 
 | Signal | Width | Encoding |
 |---|---|---|
-| `alu_operation` | 4 | `0000` AND, `0001` OR, `0010` ADD, `0011` XOR, `0100` SLL, `0101` SRL, `0110` SUB, `0111` SLT, `1000` SLTU, `1001` SRA. **Free: `1010`–`1111`** (M and Zbb will need more codes; widening to 5 bits is likely in Task 7). |
+| `alu_operation` | 6 | Widened from 4 bits in Task 5 (M has 8 operations, Zbb 17, the base ALU 10: 35 codes do not fit in 5 bits). `[5:4] = 00` base ALU, `[3:0]`: `0000` AND, `0001` OR, `0010` ADD, `0011` XOR, `0100` SLL, `0101` SRL, `0110` SUB, `0111` SLT, `1000` SLTU, `1001` SRA. `[5:4] = 01` M unit, `[2:0]` = funct3: `000` MUL, `001` MULH, `010` MULHSU, `011` MULHU (combinational multiplier), `100` DIV, `101` DIVU, `110` REM, `111` REMU (iterative divider). `[5] = 1` is reserved for Zbb (Task 7), operation in `[4:0]`. |
 | `alu_branch_control` | 3 | = funct3 of the branch |
 | `DataFormat` | 3 | = funct3 of the load/store |
 | `ALUSrcA` | 2 | `00` rs1, `01` zero (LUI), `10` PC (AUIPC) |

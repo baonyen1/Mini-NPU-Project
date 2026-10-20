@@ -6,8 +6,6 @@
 # 2026-10-20: plan Task 4 added the tests for M, Zicsr, Zbb/Zifencei and custom-0
 # before the RTL exists (test first). Each line below is deleted by the commit
 # that implements its feature.
-m_*                                  # 2026-10-20: M extension not implemented yet (plan Task 5)
-randm_*                              # 2026-10-20: M extension not implemented yet (plan Task 5)
 csr_ops_all6                         # 2026-10-20: Zicsr not implemented yet (plan Task 6)
 minstret_delta                       # 2026-10-20: Zicsr not implemented yet (plan Task 6)
 mcycle_ge_minstret                   # 2026-10-20: Zicsr not implemented yet (plan Task 6)

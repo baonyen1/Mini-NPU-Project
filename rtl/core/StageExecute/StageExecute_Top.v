@@ -23,6 +23,12 @@ module StageExecute_Top(
     regfile_write_enable_ID_EX,
     writeback_mux_sel_ID_EX,
 
+    // stall interface (Hazard_Unit, docs/core_stall.md)
+    ex_stall,
+    ex_mem_stall,
+    ex_mem_bubble,
+    div_busy,
+
     // forwarding sources from MEM and MEM/WB
     alu_out_MEM_WB,
     datamem_out_MEM_WB,
@@ -57,7 +63,7 @@ input [4:0] regfile_write_address_ID_EX;
 input jump_target_mux_sel_ID_EX;
 input [1:0] alu_src_a_sel_ID_EX;
 input mux_1_sel_ID_EX;
-input [3:0] alu_operation_ID_EX;
+input [5:0] alu_operation_ID_EX;
 input alu_branch_ID_EX;
 input [2:0] alu_branch_control_ID_EX;
 input jump_flag_ID_EX;
@@ -67,11 +73,17 @@ input datamem_write_enable_ID_EX;
 input regfile_write_enable_ID_EX;
 input [1:0] writeback_mux_sel_ID_EX;
 
+input ex_stall;        // EX cannot advance this cycle
+input ex_mem_stall;    // hold EX/MEM
+input ex_mem_bubble;   // load a NOP into EX/MEM
+
 input [31:0] alu_out_MEM_WB;
 input [31:0] datamem_out_MEM_WB;
 input [31:0] Instruction_address_MEM_WB;
 input [2:0] fw_mux_0_sel;
 input [2:0] fw_mux_1_sel;
+
+output div_busy;       // a divide/remainder is in EX and its result is not ready
 
 output jump_branch_signal;
 output flush_signal;
@@ -92,6 +104,7 @@ wire [31:0] fw_mux_1_output;
 wire [31:0] alu_input_a;
 wire [31:0] mux_1_output;
 wire [31:0] alu_output;
+wire [31:0] ex_result;
 wire alu_branch_response;
 wire [31:0] return_address_EX_MEM;
 wire [31:0] return_address_MEM_WB;
@@ -141,6 +154,59 @@ ALU_Unit ALU(
     .alu_branch_response(alu_branch_response)
 );
 
+// ---- RV32M --------------------------------------------------------------
+// alu_operation_ID_EX[5:4] = 01 selects the M unit and [2:0] is the funct3:
+// [2] = 0 multiply (combinational), [2] = 1 divide/remainder (iterative).
+wire is_m_op   = (alu_operation_ID_EX[5:4] == 2'b01);
+wire is_mul_op = is_m_op & ~alu_operation_ID_EX[2];
+wire is_div_op = is_m_op &  alu_operation_ID_EX[2];
+
+wire [31:0] mul_result;
+wire [31:0] div_result;
+wire div_done;
+
+Multiplier MULTIPLIER(
+    .a(alu_input_a),
+    .b(mux_1_output),
+    .op(alu_operation_ID_EX[1:0]),
+    .result(mul_result)
+);
+
+// The divider starts once per instruction. div_started marks "start already
+// issued for the instruction now in EX"; it clears when that instruction
+// leaves EX. The divider samples its operands at start, so the forwarding
+// sources disappearing afterwards does not matter.
+reg div_started;
+wire div_start = is_div_op & ~div_started;
+
+Divider DIVIDER(
+    .clk(clk),
+    .reset(reset),
+    .start(div_start),
+    .is_signed(~alu_operation_ID_EX[0]),
+    .is_rem(alu_operation_ID_EX[1]),
+    .a(alu_input_a),
+    .b(mux_1_output),
+    .busy(),
+    .done(div_done),
+    .result(div_result)
+);
+
+assign div_busy = is_div_op & ~(div_started & div_done);
+
+always @(posedge clk) begin
+    if (reset)
+        div_started <= 1'b0;
+    else if (div_start)
+        div_started <= 1'b1;
+    else if (~ex_stall)
+        div_started <= 1'b0;
+end
+
+assign ex_result = is_mul_op ? mul_result :
+                   is_div_op ? div_result :
+                   alu_output;
+
 BRU BRANCH_RESOLUTION_UNIT(
     .Instruction_address_ID_EX(Instruction_address_ID_EX),
     .regfile_out_0_ID_EX(fw_mux_0_output),
@@ -157,9 +223,11 @@ BRU BRANCH_RESOLUTION_UNIT(
 EX_MEM_Reg EX_MEM(
     .clk(clk),
     .reset(reset),
+    .stall(ex_mem_stall),
+    .bubble(ex_mem_bubble),
 
     .Instruction_address_ID_EX(Instruction_address_ID_EX),
-    .alu_output(alu_output),
+    .alu_output(ex_result),
     .datamem_wr_data(fw_mux_1_output),
     .data_format_ID_EX(data_format_ID_EX),
     .datamem_read_enable_ID_EX(datamem_read_enable_ID_EX),
