@@ -13,7 +13,7 @@ Spec: `docs/superpowers/specs/2026-10-04-mini-npu-design.md` §5–§6.
 
 ## 1. Implemented instructions (RV32I)
 
-The `ALU op` column is the 4-bit `alu_operation` that `Control.v` sends to `ALU.v` (§3).
+The `ALU op` column is the base-ALU code, the low 4 bits of the 6-bit `alu_operation` that `Control.v` sends to the execute stage (§3).
 **New** marks the 10 instructions added in Task 3.
 
 | Instruction | opcode | funct3 | funct7 / imm[11:5] | ALU op | Notes |
@@ -253,7 +253,7 @@ Hardware consequences:
 - OP-IMM `funct3 = 101`: `srli` (`0000000`), `srai` (`0100000`), `rori` (`0110000`); `orc.b` and `rev8` need the full `imm[11:0]` (`0x287`, `0x698`).
 - OP: `funct7` `0000000`/`0100000` base, `0000001` M, `0000101` `min`/`max`, `0000100` `zext.h`, `0110000` `rol`/`ror`, and `0100000` also covers `andn`/`orn`/`xnor` (`funct3` 111/110/100, while `sub` and `sra` keep 000/101).
 - Anything left unmatched is a W2-1 event (§4).
-- `alu_operation` has six free codes (`1010`–`1111`, §3). Zbb needs more, so Task 7 will probably widen it to 5 bits. Document the final table in §3 when it is built.
+- `alu_operation` had six free codes (`1010`–`1111`); Task 5 widened it to 6 bits to fit M and Zbb (final table in §3).
 
 ## 7. CSR map
 
@@ -261,8 +261,8 @@ Spec §5 and §6.4. All CSRs are 32 bit.
 
 | CSR | Address | Access | Where | Notes |
 |---|---|---|---|---|
-| `mcycle` / `mcycleh` | `0xB00` / `0xB80` | RW | core | low / high word of a 64-bit cycle counter |
-| `minstret` / `minstreth` | `0xB02` / `0xB82` | RW | core | incremented at WB on retire |
+| `mcycle` / `mcycleh` | `0xB00` / `0xB80` | R (writes ignored, item 3 below) | core | low / high word of a 64-bit cycle counter |
+| `minstret` / `minstreth` | `0xB02` / `0xB82` | R (writes ignored, item 3 below) | core | incremented at WB on retire |
 | `cycle` / `cycleh` | `0xC00` / `0xC80` | RO alias | core | read of `mcycle` / `mcycleh` |
 | `instret` / `instreth` | `0xC02` / `0xC82` | RO alias | core | read of `minstret` / `minstreth` |
 | `npu_status` | `0x7C0` | bits per spec §6.4 | engine | RO bits 0–2, W1C sticky bits 8–11 |
@@ -275,7 +275,8 @@ Open points to settle with Track B before both sign §7.1, because they fix what
 1. **`csr_wdata` for `csrrs`/`csrrc` on a W1C register.** If the core sends the read-modify-write result, `csrrs` (`old | mask`) clears every error bit that is currently set, and `csrrc` (`old & ~mask`) clears the bits that are *not* in the mask. If it sends the raw `rs1`/`zimm` operand, the two instructions are indistinguishable. Spec §6.4 does not say. **Ruling:** `csr_wdata` is the read-modify-write result (the new CSR value), which keeps plain read/write registers such as `npu_busy_cyc` standard-compliant. For `npu_status`, software must use `csrrw`/`csrrwi` to clear error bits; `csrrs`/`csrrc` have the quirks above. Cost if wrong: the engine's CSR port semantics.
 2. **`csr_rdata` timing.** Spec §7.1 declares only `output [31:0] csr_rdata`. **Ruling:** combinational in `csr_addr`, because a CSR read forwards like an ALU result from EX. Cost if wrong: a registered read would need one extra stall cycle for engine CSRs.
 3. **Unimplemented address and writes to read-only aliases or to `mcycle`/`minstret`.** Spec silent. Part of W2-1 (§4). **Ruling:** reads return 0 and writes are ignored (the `npu_ref` model already returns 0 for an unknown address in `npu_ref_csr_read`).
-4. **Test stub.** `rtl/top/npu_stub.sv` models the engine side for the core-only tests: `0x7C0` reads `{err[3:0], 8'b0000_0010}` with the four sticky bits set by reset and W1C on bits 11..8 (spec §6.4 lists bits 8-11; the plan text says 8-10); `0x7C1` is a plain read/write register.
+4. **`npu_status` is not a barrier.** A CSR read executes in EX in the same cycle in which the previous instruction can be pushing its command in MEM, so `COMPUTE; csrr t0,npu_status` may read `busy = 0` and `fifo_empty = 1`. Only `READ_RESULT` drains the engine (spec §6.3 rule 5); firmware must not poll `npu_status` to wait for a command to finish.
+5. **Test stub.** `rtl/top/npu_stub.sv` models the engine side for the core-only tests: `0x7C0` reads `{err[3:0], 8'b0000_0010}` with the four sticky bits set by reset and W1C on bits 11..8 (spec §6.4 lists bits 8-11; the plan text says 8-10); `0x7C1` is a plain read/write register.
 
 ## 8. `cpu_en` record
 

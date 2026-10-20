@@ -34,6 +34,8 @@ pc_write      = !stall_id | redirect
 redirect      = (branch_taken | jump) & !stall_ex     // a held branch must not redirect
 ```
 
+Implementation note: `Hazard_Unit` exports `mem_wb_bubble = stall_mem`, but `RISC_V_Top` leaves that output unconnected; `StageMemory_Top` bubbles MEM/WB with `mem_busy` directly, which is the same signal. The behaviour is as in the table; only the wiring differs from "computed centrally".
+
 The `& !stall_<older stage>` terms are the important part. Without them a younger stage's bubble overwrites an instruction that an older stall is holding, and that instruction is lost.
 
 ## 4. Worked example: divider in EX
@@ -53,7 +55,7 @@ Without the EX/MEM bubble, D would be copied into MEM every cycle and retire abo
 
 ## 5. Pitfalls and rules
 
-1. **Divider starts once.** Use a small FSM `IDLE → BUSY → DONE`: `start = div_in_EX && state == IDLE`; DONE returns to IDLE when D leaves EX; `div_stall = div_in_EX && state != DONE`. Using `start = div_in_EX` restarts the divider every cycle.
+1. **Divider starts once.** As built, one flag `div_started` (in `StageExecute_Top.v`) replaces the `IDLE → BUSY → DONE` FSM that was first proposed: `div_start = is_div_op & ~div_started`; the flag is set at the start and cleared when the instruction leaves EX (`~ex_stall`); `div_busy = is_div_op & ~(div_started & div_done)`. Using `start = div_in_EX` would restart the divider every cycle. The divider samples its operands at `start`.
 2. **Load-use and the divider never coincide** (both need EX). The dangerous overlap is **MEM stall + load-use**: `lw` in EX, its consumer in ID, READ_RESULT waiting in MEM. The load-use bubble must be suppressed (`load_use & !stall_ex`) or the `lw` is flushed.
 3. **Branch in EX while MEM stalls**: the redirect waits until EX advances (`redirect = … & !stall_ex`), otherwise the PC is redirected while the branch is still held and IF/ID is flushed twice.
 4. **Retire accounting needs a `valid` bit** in every pipeline register. Bubbles carry `valid = 0`; only `valid = 1` at WB counts for `minstret` and the RVVI trace.
