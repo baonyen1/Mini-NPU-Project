@@ -1,6 +1,6 @@
 # Scalar core ISA — `rtl/core`
 
-Status: **RV32I base complete** (plan Task 3, 2026-10-09).
+Status: **RV32I base complete** (plan Task 3, 2026-10-09). Encodings of the planned extensions (§6), the CSR map (§7) and the `cpu_en` record (§8) were added for the week-2 freeze (plan Task 2, 2026-10-20). **Decision W2-1 is still open** (§4).
 Spec: `docs/superpowers/specs/2026-10-04-mini-npu-design.md` §5–§6.
 
 | Extension | Status | Plan task |
@@ -65,11 +65,34 @@ The `ALU op` column is the 4-bit `alu_operation` that `Control.v` sends to `ALU.
 
 Current behaviour: any encoding `Control.v` does not recognise — including `ecall`, `ebreak`, reserved funct3/funct7 values and garbage opcodes — produces no register write, no memory access and no control transfer, so it behaves as a NOP. Misaligned loads/stores are not detected (the low address bits are dropped for `lw`/`sw`).
 
-This is **not** standard RV32I behaviour (the ISA requires an exception). Options and the recommendation are in the spec discussion; the team must record one in spec §4.1 at the week-2 freeze (plan Task 2):
+This is **not** standard RV32I behaviour (the ISA requires an exception). The team must record one option in spec §4.1 and in the decision log (§3) at the week-2 freeze (plan Task 2), with the date and both signatures. The choice belongs to the students.
 
-- (a) minimal M-mode trap (`mtvec`, `mepc`, `mcause`, `mret`) — needs Zicsr first;
-- **(b) simulation halt** — `ecall`/`ebreak` assert `halt`; illegal or misaligned assert `halt` + `fault` *(recommended for Senior Project 2)*;
-- (c) keep NOP — not recommended, hides bugs.
+| Option | Mechanism | Cost | Verdict |
+|---|---|---|---|
+| (a) M-mode trap | `mtvec`, `mepc`, `mcause`, `mret`; the faulting instruction redirects the fetch | needs Zicsr first; new CSR state and a pipeline redirect; `RefISS`, `rv_iss.c` and the cosim checker must model it; more coverage bins. No firmware in this project wants to trap. | not needed |
+| **(b) simulation halt** | `ecall`/`ebreak` assert `halt`; illegal, misaligned or access fault assert `halt` + `fault` | two output ports; the ISS must stop at the same instruction; Phase 2 end-of-test already anticipates "the core's halt/fault indication if W2-1 defines one" | **recommended for Senior Project 2** |
+| (c) keep NOP | nothing | none, but a wrong encoding in Tasks 5–7 or in firmware runs silently on; only the cosim diff against the ISS would show it, and only if the ISS also skips | not recommended, hides bugs |
+
+Events the chosen policy must cover, and what option (b) would do:
+
+| Event | Today | Under (b) |
+|---|---|---|
+| Unknown or reserved encoding (reserved funct3/funct7, branch funct3 `010`/`011`, `slli` with `funct7 ≠ 0`, Zbb look-alikes, see §6.6) | NOP | `halt` + `fault` |
+| `ecall`, `ebreak` | NOP | `halt` |
+| Misaligned `lh`/`lw`/`sh`/`sw` | low address bits dropped | `halt` + `fault` |
+| Load, store or fetch outside the spec §4.1 map | depends on the harness memory | `halt` + `fault` |
+| CSR access to an unimplemented address, or a write to a read-only alias (§7) | not applicable yet | **spec is silent: decide** |
+
+The custom-0 reserved funct3 values `100`–`111` are **not** an event of this table. The core pushes them with op `ILLEGAL` and the engine sets `err_illegal` (spec §6.3).
+
+Where the decision lands:
+
+- Task 4: `RefISS` must model the same policy.
+- Task 8: if (b) is chosen, `halt` and `fault` are new core ports. They are in neither the Task 8 port list nor spec §7.1, so the plan, the spec and the RTL change in the same commit.
+- Task 12 and Task 15: `rv_iss.c` stops at the same instruction as the RTL; the end-of-test logic reads `halt`/`fault`. The RVVI `trap` field has to be given a meaning too (set on the faulting instruction or not).
+- Task 17: `core_read_result_hang_times_out` stays a timeout failure either way.
+
+**Decision: open.** Record here, in spec §4.1 and in the §3 decision log: option, date, both signatures.
 
 ## 5. Verification
 
@@ -91,3 +114,127 @@ Mutation sanity check (the suite must fail when the RTL is wrong):
 | `bltu` implemented as signed compare | 2 directed + 31 random seeds fail |
 
 Memory model in the harness is still the Senior Project 1 one (1 KB IMEM, 1 KB DMEM). It moves to the spec map (ITCM 16 KB, DTCM 64 KB) in plan Task 8.
+
+## 6. Planned instructions: encodings (week-2 freeze)
+
+The instruction list comes from spec §5 and §6.1. Every example word was produced by `riscv64-unknown-elf-as` 2.42 (`-march=rv32im_zicsr_zifencei_zbb -mabi=ilp32`; custom-0 through `.insn`) on 2026-10-20, with `rd = x3`, `rs1 = x1`, `rs2 = x2` unless a row says otherwise. They are also usable as hand-check vectors for the decoder tests.
+
+### 6.1 M extension (Task 5)
+
+Opcode `0110011`, `funct7 = 0000001`. Base `add` and `sub` use `funct7 = 0000000` / `0100000`, so `funct7` is what separates M from the base ALU.
+
+| Instruction | funct3 | Example word |
+|---|---|---|
+| `mul` | 000 | `022081b3` |
+| `mulh` | 001 | `022091b3` |
+| `mulhsu` | 010 | `0220a1b3` |
+| `mulhu` | 011 | `0220b1b3` |
+| `div` | 100 | `0220c1b3` |
+| `divu` | 101 | `0220d1b3` |
+| `rem` | 110 | `0220e1b3` |
+| `remu` | 111 | `0220f1b3` |
+
+### 6.2 Zicsr (Task 6)
+
+Opcode `1110011`. `imm[11:0]` is the CSR address. In the immediate forms the `rs1` field holds `zimm[4:0]`. `funct3 = 000` is `ecall`/`ebreak` (§6.3) and `100` is reserved. Example words use CSR `0x7C0`, `rs1 = x1` (immediate forms: `zimm = 5`).
+
+| Instruction | funct3 | Example word |
+|---|---|---|
+| `csrrw` | 001 | `7c0091f3` |
+| `csrrs` | 010 | `7c00a1f3` |
+| `csrrc` | 011 | `7c00b1f3` |
+| `csrrwi` | 101 | `7c02d1f3` |
+| `csrrsi` | 110 | `7c02e1f3` |
+| `csrrci` | 111 | `7c02f1f3` |
+
+### 6.3 Zifencei, `fence`, `ecall`, `ebreak` (Task 7)
+
+| Instruction | opcode | funct3 | imm[11:0] | Example word |
+|---|---|---|---|---|
+| `fence` | 0001111 | 000 | `fm/pred/succ` (not decoded) | `0ff0000f` (`fence iorw,iorw`) |
+| `fence.i` | 0001111 | 001 | 0 | `0000100f` |
+| `ecall` | 1110011 | 000 | `0x000` | `00000073` |
+| `ebreak` | 1110011 | 000 | `0x001` | `00100073` |
+
+`fence.i` flushes the pipeline and refetches; there is no I-cache (spec §5). Its `funct3` is what separates it from `fence`. `ecall`/`ebreak` follow decision W2-1 (§4).
+
+### 6.4 Zbb, RV32 subset of spec §5 (Task 7)
+
+For the unary rows, `imm[11:0]` is fixed, so the `rs2` field is part of the encoding. For `rori`, `imm[4:0]` is the shift amount.
+
+| Instruction | opcode | funct3 | funct7 / imm[11:5] | rs2 field / imm[4:0] | Example word |
+|---|---|---|---|---|---|
+| `andn` | 0110011 | 111 | 0100000 | rs2 | `4020f1b3` |
+| `orn` | 0110011 | 110 | 0100000 | rs2 | `4020e1b3` |
+| `xnor` | 0110011 | 100 | 0100000 | rs2 | `4020c1b3` |
+| `clz` | 0010011 | 001 | 0110000 | 00000 | `60009193` |
+| `ctz` | 0010011 | 001 | 0110000 | 00001 | `60109193` |
+| `cpop` | 0010011 | 001 | 0110000 | 00010 | `60209193` |
+| `sext.b` | 0010011 | 001 | 0110000 | 00100 | `60409193` |
+| `sext.h` | 0010011 | 001 | 0110000 | 00101 | `60509193` |
+| `max` | 0110011 | 110 | 0000101 | rs2 | `0a20e1b3` |
+| `maxu` | 0110011 | 111 | 0000101 | rs2 | `0a20f1b3` |
+| `min` | 0110011 | 100 | 0000101 | rs2 | `0a20c1b3` |
+| `minu` | 0110011 | 101 | 0000101 | rs2 | `0a20d1b3` |
+| `zext.h` | 0110011 | 100 | 0000100 | 00000 | `0800c1b3` |
+| `rol` | 0110011 | 001 | 0110000 | rs2 | `602091b3` |
+| `ror` | 0110011 | 101 | 0110000 | rs2 | `6020d1b3` |
+| `rori` (shamt 5) | 0010011 | 101 | 0110000 | shamt | `6050d193` |
+| `orc.b` | 0010011 | 101 | 0010100 | 00111 | `2870d193` |
+| `rev8` | 0010011 | 101 | 0110100 | 11000 | `6980d193` |
+
+`zext.h` on RV32 is the encoding of `pack rd, rs1, x0`. `pack` itself is not in Zbb, so the decoder must require `rs2 = 00000`; any other `rs2` is not a Zbb instruction (§4).
+
+### 6.5 custom-0 (Task 9)
+
+Opcode `0001011`, R-type. Normative text: spec §6.1. Example words use `rs1 = x1`, `rs2 = x2` (`rd = x3` for READ_RESULT); the `sw/npu.h` wrappers (Task 13) put `x0` in every unused register field.
+
+| Instruction | funct3 | funct7 | rd | rs1 | rs2 | Example word |
+|---|---|---|---|---|---|---|
+| `LOAD_WEIGHT` | 000 | 0000000 | ignored (`x0`) | DTCM byte address | K | `0020800b` |
+| `LOAD_INPUT` | 001 | 0000000 | ignored (`x0`) | DTCM byte address | K | `0020900b` |
+| `COMPUTE` clr = 0 | 010 | 0000000 | ignored (`x0`) | K | unused (`x0`) | `0000a00b` |
+| `COMPUTE` clr = 1 | 010 | 0000001 | ignored (`x0`) | K | unused (`x0`) | `0200a00b` |
+| `READ_RESULT` | 011 | 0000000 | destination | `idx` (`rs1[3:0]`) | unused (`x0`) | `0000b18b` |
+| reserved | 100–111 | — | — | — | — | pushed as op `ILLEGAL` (not a core fault) |
+
+Hardware consequences:
+
+- "Ignored `rd`" means **no register write**, even when the field is not `x0`.
+- The hazard logic must not treat the unused `rs2` field of `COMPUTE`/`READ_RESULT` as a source register: a dummy source would cause spurious load-use stalls or forwarding. Check it in Task 9.
+- `LOAD_WEIGHT`/`LOAD_INPUT` read both `rs1` and `rs2` in **MEM** (the push stage, spec §6.3 rule 2), one stage later than an ALU instruction does. How those operands get there is a Task 9 design question.
+
+### 6.6 Decode collisions with the RV32I decoder
+
+`Control.v` today tests `fun7` in every R-type case and in the shift-immediate cases, and treats any value it does not know as not decoded (§2). That rule has to change in Task 5 and Task 7:
+
+- OP-IMM `funct3 = 001`: `slli` needs `imm[11:5] = 0000000`; `clz ctz cpop sext.b sext.h` use `imm[11:5] = 0110000` and select the operation with `imm[4:0]`. These share the opcode and `funct3` with `slli`.
+- OP-IMM `funct3 = 101`: `srli` (`0000000`), `srai` (`0100000`), `rori` (`0110000`); `orc.b` and `rev8` need the full `imm[11:0]` (`0x287`, `0x698`).
+- OP: `funct7` `0000000`/`0100000` base, `0000001` M, `0000101` `min`/`max`, `0000100` `zext.h`, `0110000` `rol`/`ror`, and `0100000` also covers `andn`/`orn`/`xnor` (`funct3` 111/110/100, while `sub` and `sra` keep 000/101).
+- Anything left unmatched is a W2-1 event (§4).
+- `alu_operation` has six free codes (`1010`–`1111`, §3). Zbb needs more, so Task 7 will probably widen it to 5 bits. Document the final table in §3 when it is built.
+
+## 7. CSR map
+
+Spec §5 and §6.4. All CSRs are 32 bit.
+
+| CSR | Address | Access | Where | Notes |
+|---|---|---|---|---|
+| `mcycle` / `mcycleh` | `0xB00` / `0xB80` | RW | core | low / high word of a 64-bit cycle counter |
+| `minstret` / `minstreth` | `0xB02` / `0xB82` | RW | core | incremented at WB on retire |
+| `cycle` / `cycleh` | `0xC00` / `0xC80` | RO alias | core | read of `mcycle` / `mcycleh` |
+| `instret` / `instreth` | `0xC02` / `0xC82` | RO alias | core | read of `minstret` / `minstreth` |
+| `npu_status` | `0x7C0` | bits per spec §6.4 | engine | RO bits 0–2, W1C sticky bits 8–11 |
+| `npu_busy_cyc` | `0x7C1` | RW | engine | counts cycles with `fsm != IDLE`; a write sets the value |
+
+`time` / `timeh` (`0xC01` / `0xC81`) are not implemented. The core forwards `0x7C0` and `0x7C1` to the engine over the CSR port (spec §7.1; `CSR_Unit` ports in plan Task 6).
+
+Open points to settle with Track B before both sign §7.1, because they fix what `csr_*` means:
+
+1. **`csr_wdata` for `csrrs`/`csrrc` on a W1C register.** If the core sends the read-modify-write result, `csrrs` (`old | mask`) clears every error bit that is currently set, and `csrrc` (`old & ~mask`) clears the bits that are *not* in the mask. If it sends the raw `rs1`/`zimm` operand, the two instructions are indistinguishable. Spec §6.4 does not say. Plan Task 6 test `csr_ops_all6` runs all six instructions against a W1C stub, so the answer decides its expected values.
+2. **`csr_rdata` timing.** Spec §7.1 declares only `output [31:0] csr_rdata`. A read that must forward like an ALU result (Task 6 Step 3) needs it in the same cycle as `csr_addr`; a registered read adds a cycle and a stall.
+3. **Unimplemented address and writes to read-only aliases or to `mcycle`/`minstret`.** Spec silent. Part of W2-1 (§4); the `npu_ref` model already returns 0 for an unknown address in `npu_ref_csr_read`.
+
+## 8. `cpu_en` record
+
+`cpu_en` was the Senior Project 1 DFS clock-enable. It was **removed** in Task 1 (`69cd798`, 2026-10-05), not tied to `1'b1` at the top. Checked 2026-10-20: `grep -rn cpu_en rtl tools/rv32i_check` finds nothing.
