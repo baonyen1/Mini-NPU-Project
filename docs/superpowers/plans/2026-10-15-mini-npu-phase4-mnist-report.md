@@ -26,7 +26,7 @@
 
 ## Global Constraints (Phase 4 additions)
 
-- Model: 784-64-32-10 from the retrained notebook export (Phase 1 Task 2). The export files' SHA-256 values are recorded in `manifest.yaml`; every generated hex records the export hash it came from.
+- Model: 784-64-32-10 from the retrained export committed in `model/py/export/` (Phase 1 Tasks 2 and 2b; its `manifest.json` lists the per-file SHA-256 values). The export files' SHA-256 values are recorded in `manifest.yaml`; every generated hex records the export hash it came from.
 - DTCM layout exactly as §9.2 (bases, sizes, 16-byte alignment). W3 is padded from 10 to 12 rows with zeros; predicted labels are the argmax over rows 0–9 only.
 - Requant (§9.3): `y = clamp((acc * M + 2^(S−1)) >>> S, 0, 127)` with bias inside `acc`; final layer keeps int32. Firmware uses only `mul`, `add`, `srai`, `max`, `min`.
 - QP region (§9.2, 16 words at `0x1_CF30`): word 0 = M1, word 1 = S1, word 2 = M2, word 3 = S2, words 4–15 = 0.
@@ -38,7 +38,7 @@
 
 ## Review Focus
 
-1. **Requant edge cases:** negative accumulators, exact half-way rounding, accumulators near the int32 bound found by `find_ms`. Expected: bit-identical to the notebook's `requant`. Test: Task 26 `requant_host_vectors`.
+1. **Requant edge cases:** negative accumulators, exact half-way rounding, accumulators near the int32 bound found by `find_ms`. Expected: bit-identical to `golden_int8.requant`. Test: Task 26 `requant_host_vectors`.
 2. **State leaking across batches:** stale IBUF contents or accumulators from the previous batch must not affect the next one. Test: Task 27 `mnist_batch_order_independent`.
 3. **Padding rows counted as classes:** rows 10–11 of W3 must be zero and ignored by argmax. Tests: Task 25 `pack_w3_padding_zero`, Task 27 comparator computes labels over rows 0–9.
 4. **Export/hex drift after a retrain:** golden files and DTCM images generated from different exports would give a meaningless comparison. Test: Task 27 `mnist_export_hash_check` (run refuses to start on a hash mismatch).
@@ -54,7 +54,7 @@
 - Create: `docs/mnist.md` (layout table copied from §9.2 with the generated addresses, batch protocol incl. MAILBOX = 2, hashes)
 
 **Interfaces:**
-- Consumes: the retrained export in `model/py/export/` and `golden_int8.py`.
+- Consumes: the retrained export in `model/py/export/`; `golden_int8.load_export` and `golden_int8.IntModel` (Phase 1 Task 2b).
 - Produces:
   - `pack_weights.py --export model/py/export --n {100,1000,10000} --out build/mnist`
   - `pack_tile(W_rows: np.ndarray[int8, (4, K)]) -> bytes` (quad s, word i = `W[i][4s..4s+3]`, lane t = byte t); `unpack_tile(b: bytes, K: int) -> np.ndarray`
@@ -89,7 +89,7 @@
   ```
 
 - [ ] **Step 1: Write the failing tests:**
-  - `requant_host_vectors` (Review Focus 1): `gen_requant_vectors.py` emits ≥ 10,000 `(acc, M, S, y)` lines from the notebook's `requant`, including negative `acc`, `acc` values where `(acc·M) mod 2^S = 2^(S−1)` (half-way), and `|acc|` equal to each layer's `bound`; `test_requant_host` asserts every `y`
+  - `requant_host_vectors` (Review Focus 1): `gen_requant_vectors.py` emits ≥ 10,000 `(acc, M, S, y)` lines from `golden_int8.requant`, including negative `acc`, `acc` values where `(acc·M) mod 2^S = 2^(S−1)` (half-way), and `|acc|` equal to each layer's `bound`; `test_requant_host` asserts every `y`
   - `mnist_1batch`: firmware on `npu_tb_top` with cosim on (`ISS_FULL`), images 0–3: LOGITS (12 × 4 int32) equal `golden_logits` rows 0–9 of those images
 - [ ] **Step 2:** Run → FAIL. **Step 3:** Implement. **Step 4:** both green.
 - [ ] **Step 5: Commit** `feat(sw): MNIST firmware with bit-exact requant`.

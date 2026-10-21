@@ -24,6 +24,7 @@
 | 0 · Tool gate | Tấn: S1 UVM, S3 coverage, S5 toolchain, S6 xsim · Bảo: S2 DPI-C, S4 Verilator ICG, S7 VCD by scope | closed 2026-10-18: S1–S3, S5–S7 pass (`docs/smoke/results.md`); S4 Verilator part skipped by team decision |
 | 1 · Core cleanup | Track A | done (`69cd798`) |
 | 2 · Week-2 freeze | both (Tấn: `docs/core_isa.md`, W2-1; Bảo: `npu_pkg.sv`, notebook retrain; both sign §6/§7.1) | open |
+| 2b · `golden_int8.py` | Bảo | open; added and decided 2026-10-21 (spec D14, D15) |
 | 3 · Complete RV32I | Track A (Tấn takes over, handover step below) | done (`c413abd`) |
 | 4 · Extend reference ISS | Claude **[support]** | done (`0d7b38c`, 2026-10-20) |
 | 5, 6, 7, 9, 12 · M, Zicsr, Zifencei/Zbb, custom-0 push, `rv_iss.c` | Tấn | implemented by Claude at Tấn's request, 2026-10-20: 5 `040e81c`, 6 `ef773fc`, 7 `3d4fede`, 9 `95e5091`, 12 `fbc3fd5`. **Tấn must still review and be able to defend them** (report: `docs/reports/2026-10-20-track-a-phase1.md`). |
@@ -60,12 +61,12 @@
 
 | Phase | Weeks | Plan file | Exit criterion |
 |---|---|---|---|
-| **1 (this plan)** | 1–4 | `2026-10-04-mini-npu-phase1.md` | Tasks 0–11 done |
+| **1 (this plan)** | 1–4 | `2026-10-04-mini-npu-phase1.md` | Tasks 0–11 and 2b done |
 | 2 | 5–9 | `2026-10-15-mini-npu-phase2-uvm-integration.md` | `npu_top` integrated; mac/core/soc UVM envs; coverage closed (SC1, SC2) |
 | 3 | 10–12 | `2026-10-15-mini-npu-phase3-gating-power.md` | D1 cycle-identical to D0 (SC3); E2 switching data (SC4) |
 | 4 | 13–16 | `2026-10-15-mini-npu-phase4-mnist-report.md` | MNIST bit-exact (SC5); E4; reproducibility package (SC6); report |
 
-**Schedule risk (flagged now):** Track A in weeks 3–4 carries Tasks 5, 6, 7, 8, 9 and 12, plus Tấn's handover of a core he did not write. That is the densest stretch of the project. `dtcm_dp` moves to Track B to lighten it. If Task 12 (`rv_iss.c`) slips, it may move into week 5, because Phase 2's `core_env` needs it only from week 5. Track B starts late: Task 10 was due in week 2, so Bảo starts it immediately and Task 11 has no slack. Nothing else may slip past week 4 without re-planning.
+**Schedule risk (flagged now):** Track A in weeks 3–4 carries Tasks 5, 6, 7, 8, 9 and 12, plus Tấn's handover of a core he did not write. That is the densest stretch of the project. `dtcm_dp` moves to Track B to lighten it. If Task 12 (`rv_iss.c`) slips, it may move into week 5, because Phase 2's `core_env` needs it only from week 5. Track B starts late: Task 10 was due in week 2, so Bảo starts it immediately and Task 11 has no slack. Task 2b (added 2026-10-21) adds about half a day (estimate) to Track B in the same weeks. It is the first thing to defer if Task 11 slips, because only Phase 4 uses `golden_int8.py` (Phases 2 and 3 do not reference it); its hard deadline is the start of week 13 (Task 25). Nothing else may slip past week 4 without re-planning.
 
 ---
 
@@ -122,15 +123,59 @@
 **Files:**
 - Create: `docs/core_isa.md`. It holds the encoding table for every instruction the core will support, the CSR map, the W2-1 policy (illegal instruction, out-of-range access) and the `cpu_en` decision.
 - Create: `rtl/top/npu_pkg.sv`. It holds the parameters from §4.2, `typedef enum logic [1:0] {OP_LDW=2'd0, OP_LDI=2'd1, OP_MAC=2'd2, OP_ILLEGAL=2'd3} npu_op_e;`, and the CSR addresses as `localparam`.
-- Modify: spec §3.2 (record the O1 requant choice, and the O2 formula copied verbatim from `golden_int8.py` into §9.3), spec §4.1 (W2-1), spec status → "frozen §6, §7.1".
+- Modify: spec §3.2 (record the O1 requant choice, and close O2 with the retrained per-layer `M`, `S` and the float/int8 accuracy), spec §4.1 (W2-1), spec status → "frozen §6, §7.1". The §9.3 formula text stays as it is; Task 2b moves its stated source to `golden_int8.py`.
 
 **Interfaces:**
 - Produces: `npu_pkg` (imported by every SV file in `rtl/npu`, `rtl/top` and `tb/`); frozen spec §6 and §7.1.
 
-- [ ] **Step 1:** Retrain `notebooks/MiniNPU_MLP.py` with `layer_sizes=[784, 64, 32, 10]` (spec model) and export to `model/py/` (weights, biases, `requant.json`, test vectors, accuracy). Check the exported `M`, `S` against the §9.3 formula and record float/int8 accuracy in the spec.
+- [ ] **Step 1:** Retrain `notebooks/MiniNPU_MLP.py` with `layer_sizes=[784, 64, 32, 10]` (spec model). Set `Config.export_dir` to `model/py/export` (D14), resolved from the notebook's own folder so it does not depend on the kernel's working directory, and run the pipeline from the marimo UI. The export holds weights, biases, `requant.json`, test vectors and `manifest.json`. Check the exported `M`, `S` against the §9.3 rule (largest `S` with `bound·M + 2^(S−1) ≤ 2³¹−1`) and record the per-layer `M`, `S` and the float/int8 accuracy in spec §3.2 O2. Commit the export with that spec edit; in the same commit remove the "export not committed yet" notes from spec §9.2, from the spec's known-issues table and from `CLAUDE.md` §10: `feat(model): retrained 784-64-32-10 export`.
 - [ ] **Step 2:** Write `docs/core_isa.md` and `rtl/top/npu_pkg.sv`. `npu_pkg.sv` must compile: run `vlog -sv rtl/top/npu_pkg.sv` on QuestaSim (clean) and `verilator --lint-only -Wall rtl/top/npu_pkg.sv` (clean).
 - [ ] **Step 3:** Both students read §6 and §7.1 and sign off in the spec header ("Frozen 2026-10-xx by A, B"). From this point, changes need both signatures.
 - [ ] **Step 4: Commit** `docs: freeze ISA and engine interface`.
+
+---
+
+### Task 2b: `golden_int8.py` — Track B, weeks 3–4
+
+Added 2026-10-21 (spec D14, D15). SC5 and Phase 4 name `golden_int8.py`, but no earlier task created it; until now the notebook's `IntModel` served as the integer reference. This task moves that reference into an importable file and gives it its own unit tests, which §10.2 requires before any oracle is used.
+
+**Files:**
+- Create: `model/py/golden_int8.py`, `model/py/tests/test_golden_int8.py`
+- Modify: `notebooks/MiniNPU_MLP.py` (import the moved functions; `quantize_weight`, `quantize_bias` and the training code stay)
+- Modify: spec §9.3 (the formula's stated source), spec §10.2 (one sentence on `golden_int8.py` and its gate), the risk row "Requant mismatch with golden", `docs/glossary.md` ("Golden model" example list), `CLAUDE.md` §10 (drop the `golden_int8.py` gotcha)
+
+**Interfaces:**
+- Consumes: the committed `model/py/export/` (Task 2 Step 1); `model/c/npu_ref.h` (Task 10).
+- Produces (pure numpy, no torch; moved from the notebook unchanged except where noted):
+  ```python
+  def quantize_input(p: np.ndarray) -> np.ndarray: ...            # int8 in 0..127, spec §4.1: (p*254 + 255) // 510
+  def requant(acc: np.ndarray, M: int, S: int) -> np.ndarray: ...  # int8, clamp((acc*M + 2**(S-1)) >> S, 0, 127), arithmetic shift
+  def find_ms(real: float, bound: int) -> tuple[int, int]: ...     # largest S with M >= 1 and bound*M + 2**(S-1) <= 2**31 - 1
+  def compute_bound(w_q: np.ndarray, b_q: np.ndarray) -> int: ...  # max_j (sum_i |w_q[j][i]|*127 + |b_q[j]|)
+  class IntModel:
+      def __init__(self, quant: dict): ...                          # quant[i] = {'w_q', 'b_q', 'M', 'S'}; M, S are None on the last layer
+      def forward(self, x_int: np.ndarray) -> dict: ...             # act1, act2, logit (int32, padded rows kept), label = argmax(logit[:, :10])
+  def load_export(export_dir: str) -> tuple[dict, dict]: ...       # (quant, manifest) read from the .mem files, requant.json, manifest.json
+  ```
+  Changes versus the notebook: `IntModel` no longer takes `config` (the layer count is `len(quant)`); `load_export` replaces the two copies of the file reader in the notebook's round-trip and interactive cells.
+
+- [ ] **Step 1: Write the failing tests** in `test_golden_int8.py`:
+  - `requant_hand_vectors`: `(acc, M, S) → y`: `(10,1,1)→5`, `(−5,1,1)→0`, `(1000,1,3)→125`, `(2000,1,3)→127`, `(7,1,2)→2`
+  - `requant_matches_python_int` (Phase 4 Review Focus 1): ≥ 10,000 random `(acc, M, S)` with `|acc|·M + 2^(S−1) ≤ 2³¹−1`, including negative `acc` and values with `(acc·M) mod 2^S = 2^(S−1)`; `y == min(127, max(0, (acc*M + 2**(S-1)) >> S))` evaluated with Python ints
+  - `input_quant_all_pixels`: for every `p` in 0..255, `quantize_input(p) == (p*254 + 255)//510`; `0 → 0`, `2 → 1`, `255 → 127`
+  - `bound_hand_case`: `w_q = [[127,127,127,−127],[−127,127,−127,127]]`, `b_q = [1000,−1000]` → `65516`
+  - `find_ms_is_largest_s`: for 1,000 random `(real, bound)` with `real` in [1e-4, 1e-1] and `bound` in [10³, 10⁷]: `M ≥ 1`, `bound·M + 2^(S−1) ≤ 2³¹−1`, and with `M' = round(real·2^(S+1))` the next `S` violates the bound
+  - `forward_matches_python_int`: random 3-layer `quant` with the real shapes (784-64-32-12, `w_q` in ±127, `M`, `S` from `find_ms`); `forward` on 20 random inputs and on the all-127 input equals a plain-Python-int loop for `act1`, `act2`, `logit`
+  - `forward_worst_case_no_wrap`: single-layer `quant`, `x` = 784 × 127, one row of `w_q` = 784 × 127, `b_q = 0` → `logit == 12,645,136 == compute_bound`, no wrap
+  - `argmax_ignores_padding` (Phase 4 Review Focus 3): set logit rows 10–11 above every row 0–9; `label` is unchanged and in 0..9
+  - `export_roundtrip`: `load_export('model/py/export')` then `forward(testvec_input)` equals `testvec_expected.npz` on `act1`, `act2`, `logit[:, :10]`, `label`; the SHA-256 of every file equals `manifest.json`
+  - `export_requant_matches_rule`: for fc1 and fc2, `find_ms(s_x·s_w/s_y, bound)` from `manifest.json` equals `requant.json`, and `bound` equals `compute_bound` of the exported weights
+  - `golden_tile_matches_npu_ref`: build `model/c/npu_ref.c` with host `gcc -shared` into `build/` and load it with `ctypes`; for W1 rows 0–3 and test images 0–3 (K = 784, quad layout of §6.2, `READ_RESULT` index `4*i + j`), the engine tile `C[i][j]` equals `W1[i]·x[j]` (the engine adds no bias)
+- [ ] **Step 2:** Run `python -m pytest model/py/tests -v` → FAIL (`golden_int8` is not importable).
+- [ ] **Step 3:** Implement `model/py/golden_int8.py`: move the five notebook definitions and write `load_export` (`.mem` files are row-major `[out][in]`, int8 as 2 hex digits, int32 as 8; shapes come from `manifest['layer_sizes']` and `manifest['fc3_pad']`).
+- [ ] **Step 4:** Run the same command → all pass; quote the summary line.
+- [ ] **Step 5:** In the notebook, put `model/py` on `sys.path` (resolved from the notebook's folder), import the moved functions, delete their definitions and the notebook tests that only cover them, and replace both file readers with `load_export`. Re-run the pipeline from the marimo UI. Expected: the remaining unit tests, the round-trip and the reproducibility cells pass, and `git diff --stat model/py/export` is empty (the refactor changes no exported byte).
+- [ ] **Step 6: Commit** `feat(model): golden_int8 reference with unit tests`. In the same commit: spec §9.3 names `model/py/golden_int8.py` (functions `requant`, `find_ms`) as the formula's source, the risk row "Requant mismatch with golden" points at `golden_int8.requant` instead of the notebook's, spec §10.2 gets one sentence on the file and its gate, and the glossary "Golden model" row lists `golden_int8.py` instead of "notebook int8".
 
 ---
 
