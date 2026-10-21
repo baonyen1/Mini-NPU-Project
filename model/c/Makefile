@@ -1,5 +1,8 @@
 CC      ?= gcc
-CFLAGS  ?= -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined
+# C99 (CLAUDE.md section 5). -fno-sanitize-recover makes a sanitizer finding fail the run instead of only printing it.
+# MinGW has no ASan/UBSan runtime (ld: cannot find -lasan): there use
+#   make CFLAGS="-std=c99 -Wall -Wextra -Werror -O1 -g -fsanitize=undefined -fsanitize-undefined-trap-on-error"
+CFLAGS  ?= -std=c99 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all
 BUILD   := build
 
 .PHONY: test xcheck clean

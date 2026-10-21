@@ -286,6 +286,16 @@ static void test_addr_misaligned(void)
     }
 }
 
+static void test_k_checked_before_align_and_addr(void)   /* Task 10 Step 3: K, then align, then range */
+{
+    for (int o = 0; o < 2; o++) {
+        expect_dropped(LOADS[o], 0x00010004u, 6, 0, NPU_ST_ERR_K);      /* misaligned, K % 4 != 0 */
+        expect_dropped(LOADS[o], 0x00010004u, 1028, 0, NPU_ST_ERR_K);   /* misaligned, K > KMAX */
+        expect_dropped(LOADS[o], 0xFFFFFFF0u, 6, 0, NPU_ST_ERR_K);      /* out of range, K % 4 != 0 */
+        expect_dropped(LOADS[o], 0xFFFFFFF0u, 1028, 0, NPU_ST_ERR_K);   /* out of range, K > KMAX */
+    }
+}
+
 static void test_mac_ignores_addr(void)
 {
     expect_dropped(NPU_OP_MAC, 0x00000003u, 4, 1, 0);
@@ -440,6 +450,7 @@ int main(void)
     RUN(test_load_addr_wraps_32bit);
     RUN(test_last_quad_ok);
     RUN(test_addr_misaligned);
+    RUN(test_k_checked_before_align_and_addr);
     RUN(test_mac_ignores_addr);
     RUN(test_illegal_op);
     RUN(test_illegal_wins_over_other_checks);
