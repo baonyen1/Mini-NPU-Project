@@ -14,6 +14,11 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
+if ((Test-Path (git rev-parse --git-path rebase-merge)) -or (Test-Path (git rev-parse --git-path rebase-apply))) {
+  Write-Host "A rebase is still in progress: finish it (git add, git rebase --continue), then rerun." -ForegroundColor Red
+  exit 1
+}
+
 if (-not $SkipTests) {
   Write-Host "== Running tools/rv32i_check/run_all.py ==" -ForegroundColor Cyan
   python tools/rv32i_check/run_all.py
@@ -22,10 +27,18 @@ if (-not $SkipTests) {
 
 git add -A
 git diff --cached --quiet
-if ($LASTEXITCODE -eq 0) { Write-Host "Nothing to commit." -ForegroundColor Yellow; exit 0 }
-git --no-pager diff --cached --stat
-git commit -m $Message
-if ($LASTEXITCODE -ne 0) { exit 1 }
+if ($LASTEXITCODE -eq 0) {
+  # Nothing new to commit. After a resolved rebase conflict the commit is still local: carry on and push it.
+  git fetch origin
+  if ($LASTEXITCODE -ne 0) { exit 1 }
+  $ahead = [int](git rev-list --count origin/main..HEAD)
+  if ($ahead -eq 0) { Write-Host "Nothing to commit or push." -ForegroundColor Yellow; exit 0 }
+  Write-Host "Nothing new to commit; $ahead commit(s) not on origin/main yet - rebasing and pushing." -ForegroundColor Yellow
+} else {
+  git --no-pager diff --cached --stat
+  git commit -m $Message
+  if ($LASTEXITCODE -ne 0) { exit 1 }
+}
 
 Write-Host "== Pulling teammate's commits (rebase) ==" -ForegroundColor Cyan
 git pull --rebase origin main
