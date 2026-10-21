@@ -148,8 +148,10 @@ def _(np):
             M = int(np.round(real * (2 ** S)))
             if M >= 1 and bound * M + (2 ** (S - 1)) <= INT32_MAX:
                 return M, S
-        M = max(1, int(np.round(real * 2)))
-        return M, 1
+        raise ValueError(
+            f"find_ms: no S in 1..31 gives M >= 1 and bound*M + 2^(S-1) <= 2^31-1 "
+            f"(real={real}, bound={bound}); the layer scale or the weights are out of range"
+        )
 
     def requant(acc, M, S):
         """Mục 4.4: y = clamp((acc * M + 2^(S-1)) >> S, 0, 127)."""
@@ -728,7 +730,20 @@ def _(
         M, S = find_ms(0.5, 1000)
         assert M >= 1
         assert 1000 * M + (2 ** (S - 1)) <= INT32_MAX
+        # S must be the largest one: the next S breaks the no-overflow condition (section 4.4)
+        M_next = int(np.round(0.5 * 2 ** (S + 1)))
+        assert 1000 * M_next + 2 ** S > INT32_MAX
         print(f"✓ test_find_ms: M={M}, S={S}")
+
+    def test_find_ms_rejects_impossible():
+        """Test: when no (M, S) is valid, find_ms raises instead of returning a wrong answer."""
+        for real, bound in [(3000.0, 10**6), (1e-12, 10**6)]:
+            try:
+                find_ms(real, bound)
+            except ValueError:
+                continue
+            raise AssertionError(f"find_ms({real}, {bound}) must raise ValueError")
+        print("✓ test_find_ms_rejects_impossible")
 
     def test_hex_conversion():
         """Test: chuyển đổi hex."""
@@ -750,6 +765,7 @@ def _(
     test_padding()
     test_input_quant()
     test_find_ms()
+    test_find_ms_rejects_impossible()
     test_hex_conversion()
     print("\n✓ Tất cả test đơn vị passed!")
     return
