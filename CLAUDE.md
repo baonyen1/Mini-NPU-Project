@@ -190,7 +190,7 @@ This is a small design *inspired by* CoralNPU (`google-coral/coralnpu`, commit `
 - Before creating or editing a plan, spec or report, load the documentation skill and `superpowers:writing-plans` (when installed).
 - Plans go in `docs/superpowers/plans/YYYY-MM-DD-<name>.md`. Block notes go in `docs/<block>.md` (for example `docs/mac_engine.md`).
 
-## 10. Gotchas (as of 2026-10-20; update this list when it changes)
+## 10. Gotchas (as of 2026-10-21; update this list when it changes)
 
 - `sim/`, `tb/`, `sw/`, `power/` and `model/py` contain only READMEs. Nothing there runs yet.
 - `model/c` holds `npu_ref` (Task 10, done 2026-10-17): `make -C model/c test` is green. One open item remains: the precedence of `ILLEGAL` over `K = 0` (code: `ILLEGAL` wins; spec §6.3 says "K = 0 (any op)"). Bảo and Tấn decide and record it in the spec; RTL (Task 11) must follow. `rv_iss.c` exists (Task 12, done 2026-10-20).
@@ -200,5 +200,6 @@ This is a small design *inspired by* CoralNPU (`google-coral/coralnpu`, commit `
 - `fence`, `ecall`, `ebreak` and unknown encodings execute as NOP until decision W2-1 is recorded (`docs/core_isa.md` §4).
 - The core uses active-high `reset`, while the engine interface (spec §7.1) uses `rst_n`. Change neither without a team decision at `npu_top`.
 - The path of `npu_pkg.sv` differs between documents: spec §12 says `rtl/`, Phase 1 Task 2 says `rtl/top/`. Settle it at Task 2 and fix the other document.
-- The notebook still trains 784-32-16-10, but the spec model is 784-64-32-10. Nothing from the old export may serve as an oracle.
+- The notebook is configured for the spec model 784-64-32-10 (2026-10-21), but the retrained export is not committed yet (`model/py/export/`, decision D14, Phase 1 Task 2 Step 1). Nothing exported before that may serve as an oracle.
+- SC5 and Phase 4 name `model/py/golden_int8.py`, but the file does not exist until Phase 1 Task 2b (decision D15). Until then the notebook's `IntModel` is the only integer reference, and it has no unit tests of its own.
 - `../SeniorProject1` is the Senior Project 1 repo (DFS, Q-learning). Only the core came over. Do not edit it from here.

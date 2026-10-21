@@ -1,11 +1,11 @@
 import marimo
 
-__generated_with = "0.24.0"
-app = marimo.App(width="medium", auto_download=["html"])
+__generated_with = "0.25.0"
+app = marimo.App(width="full", auto_download=["html"])
 
 
 @app.cell
-def _(mo):
+def _(cfg, mo):
     mo.md(f"""
     # MLP MNIST 3 lớp lượng tử hóa int8 cho Mini-NPU
 
@@ -16,9 +16,9 @@ def _(mo):
 
     | Lớp | Kích thước | Hoạt động |
     |-----|-----------|-----------|
-    | FC1 | 784 → 32 | ReLU, requant về int8 |
-    | FC2 | 32 → 16 | ReLU, requant về int8 |
-    | FC3 | 16 → 10 (đệm 12) | Ra logit int32, không requant |
+    | FC1 | {cfg.layer_sizes[0]} → {cfg.layer_sizes[1]} | ReLU, requant về int8 |
+    | FC2 | {cfg.layer_sizes[1]} → {cfg.layer_sizes[2]} | ReLU, requant về int8 |
+    | FC3 | {cfg.layer_sizes[2]} → {cfg.layer_sizes[3]} (đệm {cfg.fc3_pad}) | Ra logit int32, không requant |
 
     **Mục tiêu:** Tạo (a) MLP int8 phân loại MNIST, (b) file xuất nạp vào TCM Mini-NPU, (c) golden model số nguyên cho UVM scoreboard.
 
@@ -72,7 +72,7 @@ def _():
 def _(dataclass, field):
     @dataclass
     class Config:
-        layer_sizes: list = field(default_factory=lambda: [784, 32, 16, 10])
+        layer_sizes: list = field(default_factory=lambda: [784, 64, 32, 10])
         seed: int = 0
         epochs: int = 15
         batch_size: int = 128
@@ -92,27 +92,26 @@ def _(dataclass, field):
 
 @app.cell
 def _(mo):
-    mo.md(f"""
+    mo.md(r"""
     ## Đặc tả suy luận số nguyên (mục 4)
 
     ### Input (4.1)
-    $$x_0 = (p 	imes 254 + 255) // 510$$
+    $$x_0 = (p \times 254 + 255) // 510$$
     kết quả trong 0..127, zero-point 0.
 
     ### Trọng số & bias (4.2)
-    - $s_w = \max|W| / 127$, $w_q = 	ext{{clip}}(	ext{{round}}(W/s_w), -127, 127)$
-    - $b_q = 	ext{{round}}(b / (s_x 	imes s_w))$, không dùng $-128$
+    - $s_w = \max|W| / 127$, $w_q = \text{clip}(\text{round}(W/s_w), -127, 127)$
+    - $b_q = \text{round}(b / (s_x \times s_w))$, không dùng $-128$
 
     ### Tích lũy (4.3)
-    $$	ext{{acc}}[j] = \sum_i x[i] 	imes w[j][i] + b_q[j] \quad (	ext{{int32}})$$
+    $$\text{acc}[j] = \sum_i x[i] \times w[j][i] + b_q[j] \quad (\text{int32})$$
 
     ### Requant sau FC1/FC2 (4.4)
-    $$y[j] = 	ext{{clamp}}\left(            rac{{	ext{{acc}}[j] 	imes M + 2^{{S-1}}}}{{2^S}}, 0, 127
-    ight)$$
-    $M$ nguyên dương, $S \in [1,31]$, mỗi lớp có cặp $(M,S)$ riêng.
+    $$y[j] = \text{clamp}\left(\left\lfloor \frac{\text{acc}[j] \times M + 2^{S-1}}{2^S} \right\rfloor, 0, 127\right)$$
+    $M$ nguyên dương, $S \in [1,31]$, mỗi lớp có cặp $(M,S)$ riêng. Phép chia $2^S$ là dịch phải số học (floor).
 
     ### Cận không tràn (4.5)
-    $$B_j = \sum_i |w_q[j][i]| 	imes 127 + |b_q[j]|, \quad 	ext{{bound}} = \max_j B_j$$
+    $$B_j = \sum_i |w_q[j][i]| \times 127 + |b_q[j]|, \quad \text{bound} = \max_j B_j$$
     """)
     return
 
@@ -909,7 +908,7 @@ def _(mo):
 
 
 @app.cell
-def _(IntModel, cfg, hex_to_int32, hex_to_int8, json, np, os):
+def _(IntModel, cfg, hex_to_int32, hex_to_int8, json, mo, np, os, results):
     def load_model_from_files(config):
         """Load toàn bộ model từ file xuất trong export_dir."""
         export_dir = config.export_dir
@@ -960,6 +959,7 @@ def _(IntModel, cfg, hex_to_int32, hex_to_int8, json, np, os):
 
         return int_model_loaded, test_input, expected, manifest
 
+    mo.stop(results is None, mo.md("⏭ Load model: bỏ qua (pipeline chưa chạy hoặc PyTorch không có sẵn)"))
     model_loaded, test_inputs, test_expected, manifest_loaded = load_model_from_files(cfg)
     print(f"✓ Đã load model từ {cfg.export_dir}/")
     print(f"  FC1 weight shape: {model_loaded.quant[0]['w_q'].shape}")
@@ -1042,10 +1042,10 @@ def _(
         _detail = mo.md(f"""
     #### Activation chi tiết
 
-    **FC1 activation (32 neuron, sau ReLU + requant):**
+    **FC1 activation ({len(_act1)} neuron, sau ReLU + requant):**
     {_act1.tolist()}
 
-    **FC2 activation (16 neuron, sau ReLU + requant):**
+    **FC2 activation ({len(_act2)} neuron, sau ReLU + requant):**
     {_act2.tolist()}
 
     **Logit int32 (10 chữ số):**

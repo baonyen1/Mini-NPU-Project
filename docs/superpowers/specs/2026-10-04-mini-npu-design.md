@@ -302,7 +302,7 @@ READ_RESULT reads the accumulators combinationally. They hold their value while 
 | MAILBOX | TB→FW "next batch ready" flag | 1 | 4 | `0x1_DDF0–0x1_DDF3` |
 | free / stack | | | 8,716 | `0x1_DDF4–0x1_FFFF` |
 
-The data region totals 56,816 B. Every region base is 16-byte aligned, as quad LOADs require. Weight tiles are stored quad by quad: word `16s + 4i` (byte offset within the tile) holds W[4t+i][4s..4s+3]; X and the activation buffers hold, at byte offset `16s + 4j`, the four values 4s..4s+3 of image j. Model is **784-64-32-10** (decision 2026-10-14); the notebook currently trains 784-32-16-10 and must be retrained before `pack_weights.py` generates this image. `pack_weights.py` generates this image and its linker symbols. The exact symbol addresses are taken from the linker map, not hard-coded.
+The data region totals 56,816 B. Every region base is 16-byte aligned, as quad LOADs require. Weight tiles are stored quad by quad: word `16s + 4i` (byte offset within the tile) holds W[4t+i][4s..4s+3]; X and the activation buffers hold, at byte offset `16s + 4j`, the four values 4s..4s+3 of image j. Model is **784-64-32-10** (decision 2026-10-14); the notebook has been configured for it since 2026-10-21, but the retrained export is not committed in `model/py/export/` yet (Phase 1 Task 2 Step 1), and `pack_weights.py` must not generate this image from any other export. `pack_weights.py` generates this image and its linker symbols. The exact symbol addresses are taken from the linker map, not hard-coded.
 
 ### 9.3 Per-layer loop (reference algorithm)
 
@@ -489,7 +489,7 @@ The detailed task-level plan (with "done" tests per task) is written next in `do
 | Interface churn between tracks | Freeze §6 and §7.1 at the end of week 2. Changes after that need both students' sign-off and a spec update. |
 | DTCM WAR bugs in firmware | Software rule plus A-SOC-1, and a negative test that proves the assertion fires. |
 | Requant mismatch with golden | Formula fixed in §9.3; unit-test the firmware `requant()` on the host against the notebook's `requant` with the retrained `M`, `S`. |
-| Notebook still trains 784-32-16-10 | Spec model is 784-64-32-10 (team decision 2026-10-14); notebook to be retrained and re-exported before Task 2 closes. |
+| Retrained export not committed yet | The notebook is configured for the spec model 784-64-32-10 (since 2026-10-21); run it, check `M`, `S` against §9.3 and commit `model/py/export/` (D14) before Task 2 closes. |
 | Schedule pressure | Protect the order D0 correct → D1 equivalent → switching activity → MNIST. 8×8 and pipelining are dropped first. |
 
 ## 16. Relation to CoralNPU (contribution boundary)
