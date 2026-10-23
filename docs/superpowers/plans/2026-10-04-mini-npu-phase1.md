@@ -23,7 +23,7 @@
 |---|---|---|
 | 0 · Tool gate | Tấn: S1 UVM, S3 coverage, S5 toolchain, S6 xsim · Bảo: S2 DPI-C, S4 Verilator ICG, S7 VCD by scope | closed 2026-10-18: S1–S3, S5–S7 pass (`docs/smoke/results.md`); S4 Verilator part skipped by team decision |
 | 1 · Core cleanup | Track A | done (`69cd798`) |
-| 2 · Week-2 freeze | both (Tấn: `docs/core_isa.md`, W2-1; Bảo: `npu_pkg.sv`, notebook retrain; both sign §6/§7.1) | open. `rtl/top/npu_pkg.sv` written 2026-10-23 (Verilator lint clean; Questa `vlog` still to run); notebook export (D14) and the sign-off remain |
+| 2 · Week-2 freeze | both (Tấn: `docs/core_isa.md`, W2-1; Bảo: `npu_pkg.sv`, notebook retrain; both sign §6/§7.1) | open. `rtl/top/npu_pkg.sv` written 2026-10-23 (Verilator lint clean; Questa `vlog` still to run); retrained export committed 2026-10-23 (D14, spec O1/O2 closed); only the §6/§7.1 sign-off remains |
 | 2b · `golden_int8.py` | Bảo | open; added and decided 2026-10-21 (spec D14, D15) |
 | 3 · Complete RV32I | Track A (Tấn takes over, handover step below) | done (`c413abd`) |
 | 4 · Extend reference ISS | Claude **[support]** | done (`0d7b38c`, 2026-10-20) |

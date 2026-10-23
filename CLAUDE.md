@@ -201,6 +201,6 @@ This is a small design *inspired by* CoralNPU (`google-coral/coralnpu`, commit `
 - `fence`, `ecall`, `ebreak` and unknown encodings execute as NOP until decision W2-1 is recorded (`docs/core_isa.md` §4).
 - The core uses active-high `reset`, while the engine interface (spec §7.1) uses `rst_n`. Change neither without a team decision at `npu_top`.
 - `npu_pkg.sv` lives in `rtl/top/` (2026-10-23; spec §12 fixed). A package alone has no top module, so `verilator --lint-only` and `iverilog` need a module that imports it. `GATING_EN` is a module parameter of `mac_engine`/`npu_top`, not a package constant.
-- The notebook is configured for the spec model 784-64-32-10 (2026-10-21), but the retrained export is not committed yet (`model/py/export/`, decision D14, Phase 1 Task 2 Step 1). Nothing exported before that may serve as an oracle.
+- The retrained 784-64-32-10 export is committed in `model/py/export/` (2026-10-23, D14, spec O2). It was produced on Linux; regenerating it elsewhere may change the last bits, so the committed files are the reference.
 - SC5 and Phase 4 name `model/py/golden_int8.py`, but the file does not exist until Phase 1 Task 2b (decision D15). Until then the notebook's `IntModel` is the only integer reference, and it has no unit tests of its own.
 - `../SeniorProject1` is the Senior Project 1 repo (DFS, Q-learning). Only the core came over. Do not edit it from here.

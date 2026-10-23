@@ -1,0 +1,53 @@
+{
+  "seed": 0,
+  "python_version": "3.13.16 (main, Oct  1 2026, 15:40:24) [GCC 13.3.0]",
+  "torch_version": "2.14.1+cu130",
+  "numpy_version": "2.5.4",
+  "layer_sizes": [
+    784,
+    64,
+    32,
+    10
+  ],
+  "fc3_pad": 12,
+  "s_in": 0.007874015748031496,
+  "layers": {
+    "fc1": {
+      "s_w": 0.00855481717735529,
+      "s_x": 0.007874015748031496,
+      "s_y": 0.09193006650669368,
+      "M": 768,
+      "S": 20,
+      "bound": 1608339
+    },
+    "fc2": {
+      "s_w": 0.006488052662461996,
+      "s_x": 0.09193006650669368,
+      "s_y": 0.15852464090182086,
+      "M": 7891,
+      "S": 21,
+      "bound": 249259
+    },
+    "fc3": {
+      "s_w": 0.006592994090169668,
+      "s_x": 0.15852464090182086,
+      "s_y": null,
+      "M": null,
+      "S": null,
+      "bound": 171847
+    }
+  },
+  "float_accuracy": 0.9748,
+  "int8_accuracy": 0.9743,
+  "sha256": {
+    "fc1_weight.mem": "31bb73824748992e07cba785ea6473eb5dec841bc8baf3d59ce7e7e0f9c7a1ef",
+    "fc1_bias.mem": "2738f7b850f0a58b8a412af80352281435838e075a897ac28ec66d8ecf0491d0",
+    "fc2_weight.mem": "bc8019e04248f54c228060baff3c7be0945fa0105286818cd7bfb958534ab966",
+    "fc2_bias.mem": "ddb509a5412fc5892e3c80fc7382c0950902495bdbf82a9759b5142edc2ca74a",
+    "fc3_weight.mem": "c7c90d597c099e542bf9b68e6175702d3041c1ca3ee36c02b0f3ac4ebe79f4de",
+    "fc3_bias.mem": "381f00b48b3738787eb6d5c09f3e5cbf48e3b08147c91daf6dee09a76af7ca2c",
+    "requant.json": "7692d7dd99ee9b210b7d323623954c5d7506d32cf84c601771c1f39340dad9be",
+    "testvec_input.mem": "552f282c61d709cf7870a8495a81ef5f7b19c493cfc1a60f5ef9ce66a07de81e",
+    "testvec_expected.npz": "d29e513ac0ad9e1175be822a6f9bbb6288078a713665193fcf0ac0a289eef020"
+  }
+}

@@ -69,7 +69,12 @@ def _():
 
 
 @app.cell
-def _(dataclass, field):
+def _(dataclass, field, mo, os):
+    # The export is committed (decision D14): model/py/export, resolved from this notebook's folder
+    # so it does not depend on the kernel's working directory.
+    _nb_dir = mo.notebook_dir() or os.getcwd()
+    _export_dir = os.path.normpath(os.path.join(str(_nb_dir), "..", "model", "py", "export"))
+
     @dataclass
     class Config:
         layer_sizes: list = field(default_factory=lambda: [784, 64, 32, 10])
@@ -82,7 +87,7 @@ def _(dataclass, field):
         n_test_vectors: int = 100
         n_per_digit: int = 10
         data_dir: str = "./data"
-        export_dir: str = "./mnist_export"
+        export_dir: str = _export_dir
         fc3_pad: int = 12
 
     cfg = Config()
