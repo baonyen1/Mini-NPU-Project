@@ -90,6 +90,7 @@ $env:RV_PREFIX = "riscv-none-elf-"         # only if the binutils prefix is not 
 # Golden-model unit tests (needs gcc and make)
 make -C model/c test                       # npu_ref (Task 10) and rv_iss (Task 12)
 make -C model/c xcheck                     # rv_iss vs the Python RefISS on every rv32i_check program (run run_all.py first)
+python -m pytest model/py/tests -v           # golden_int8 (Task 2b); needs numpy, pytest and gcc (cross-check with npu_ref)
 make -C sim/verilator test_dtcm_dp         # dtcm_dp directed test, twice (empty memory, +DTCM fixture); Linux/WSL, needs Verilator
 
 # Finish a task: regression -> commit -> rebase on the teammate's work -> regression -> push
@@ -193,7 +194,7 @@ This is a small design *inspired by* CoralNPU (`google-coral/coralnpu`, commit `
 
 ## 10. Gotchas (as of 2026-10-21; update this list when it changes)
 
-- `sim/`, `tb/`, `sw/`, `power/` and `model/py` contain only READMEs. Nothing there runs yet.
+- `sw/` and `power/` contain only READMEs. `tb/` holds only the directed `dtcm_dp` test (the UVM envs are empty), `sim/` only the Questa/Verilator smoke tests and `sim/verilator/Makefile`.
 - `model/c` holds `npu_ref` (Task 10, done 2026-10-17): `make -C model/c test` is green. `ILLEGAL` wins over every other check, `K = 0` included (spec D16, decided 2026-10-23, Tấn confirms with the §6 freeze); RTL (Task 11) must follow. `rv_iss.c` exists (Task 12, done 2026-10-20).
 - QuestaSim 10.7c runs UVM, `randomize`, `covergroup` and DPI-C (Task 0, 2026-10-17; `docs/smoke/results.md`). Start it with `C:\questasim64_10.7c\win64` on PATH; use `-voptargs=+acc` whenever a VCD or waveform needs inner scopes. A DPI function cannot return `bit [31:0]` (use `int unsigned` or an output argument). Verilator is not installed on Bảo's machine; S4 (Verilator ICG) was skipped on 2026-10-18, so lint and the `icg_cell` pragma under Verilator are untested. xsim is a verified fallback.
 - `tools/rv32i_check` builds `rtl/core/**/*.v` plus an explicit list in `run.py` (`core_tb_top.sv`, `core_tb_dtcm.sv`, `npu_stub.sv`, `rtl/mem/itcm.sv`) with `iverilog -g2012`. A new `.sv` file, or one that imports `npu_pkg`, is not picked up until that list is updated ([support]).
@@ -202,5 +203,5 @@ This is a small design *inspired by* CoralNPU (`google-coral/coralnpu`, commit `
 - The core uses active-high `reset`, while the engine interface (spec §7.1) uses `rst_n`. Change neither without a team decision at `npu_top`.
 - `npu_pkg.sv` lives in `rtl/top/` (2026-10-23; spec §12 fixed). A package alone has no top module, so `verilator --lint-only` and `iverilog` need a module that imports it. `GATING_EN` is a module parameter of `mac_engine`/`npu_top`, not a package constant.
 - The retrained 784-64-32-10 export is committed in `model/py/export/` (2026-10-23, D14, spec O2). It was produced on Linux; regenerating it elsewhere may change the last bits, so the committed files are the reference.
-- SC5 and Phase 4 name `model/py/golden_int8.py`, but the file does not exist until Phase 1 Task 2b (decision D15). Until then the notebook's `IntModel` is the only integer reference, and it has no unit tests of its own.
+- `model/py/golden_int8.py` (Task 2b, 2026-10-23) is the integer oracle; the notebook imports it. Its unit tests are the gate: `python -m pytest model/py/tests -v`. They compile `model/c/npu_ref.c` with the host gcc for the cross-check.
 - `../SeniorProject1` is the Senior Project 1 repo (DFS, Q-learning). Only the core came over. Do not edit it from here.

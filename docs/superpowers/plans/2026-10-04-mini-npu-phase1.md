@@ -24,7 +24,7 @@
 | 0 · Tool gate | Tấn: S1 UVM, S3 coverage, S5 toolchain, S6 xsim · Bảo: S2 DPI-C, S4 Verilator ICG, S7 VCD by scope | closed 2026-10-18: S1–S3, S5–S7 pass (`docs/smoke/results.md`); S4 Verilator part skipped by team decision |
 | 1 · Core cleanup | Track A | done (`69cd798`) |
 | 2 · Week-2 freeze | both (Tấn: `docs/core_isa.md`, W2-1; Bảo: `npu_pkg.sv`, notebook retrain; both sign §6/§7.1) | open. `rtl/top/npu_pkg.sv` written 2026-10-23 (Verilator lint clean; Questa `vlog` still to run); retrained export committed 2026-10-23 (D14, spec O1/O2 closed); only the §6/§7.1 sign-off remains |
-| 2b · `golden_int8.py` | Bảo | open; added and decided 2026-10-21 (spec D14, D15) |
+| 2b · `golden_int8.py` | Bảo | done 2026-10-23 (`model/py/golden_int8.py`, 13 tests incl. the `npu_ref` tile cross-check; notebook imports it, export bytes unchanged) |
 | 3 · Complete RV32I | Track A (Tấn takes over, handover step below) | done (`c413abd`) |
 | 4 · Extend reference ISS | Claude **[support]** | done (`0d7b38c`, 2026-10-20) |
 | 5, 6, 7, 9, 12 · M, Zicsr, Zifencei/Zbb, custom-0 push, `rv_iss.c` | Tấn | implemented by Claude at Tấn's request, 2026-10-20: 5 `040e81c`, 6 `ef773fc`, 7 `3d4fede`, 9 `95e5091`, 12 `fbc3fd5`. **Tấn must still review and be able to defend them** (report: `docs/reports/2026-10-20-track-a-phase1.md`). |

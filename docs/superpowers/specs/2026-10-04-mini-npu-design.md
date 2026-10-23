@@ -319,7 +319,7 @@ for t in 0 .. N_out/4 - 1:
                                                // neurons 4t..4t+3 of image j = next layer's quad t, word j
 ```
 
-`requant()` must be **bit-identical** to the golden model. Formula (from `notebooks/MiniNPU_MLP.py`, functions `requant` and `find_ms`):
+`requant()` must be **bit-identical** to the golden model. Formula (from `model/py/golden_int8.py`, functions `requant` and `find_ms`):
 
 ```
 acc = Σ x·w + b_q                       // bias added before requant (int32)
@@ -361,6 +361,8 @@ The last READ_RESULT has already drained the engine before step 2, so the backdo
 - `npu_ref_csr_read(addr)`: returns `npu_status` for 0x7C0, the stored value for 0x7C1, 0 for any other address (needed by `ISS_FULL` to serve CSR reads)
 
 The reference keeps its own DTCM image. Every sequence that writes the responder memory also calls `npu_ref_mem_write`.
+
+**`golden_int8.py`** (`model/py/`, pure numpy, decision D15): `quantize_input`, `requant`, `find_ms`, `compute_bound`, `IntModel` and `load_export`. It is the integer oracle for SC5 and `pack_weights.py`. **Gate:** `python -m pytest model/py/tests -v` must pass, including the cross-check of a K = 784 tile against `npu_ref`, before it is used.
 
 **`rv_iss.c`:** an RV32IM + Zicsr + Zifencei + Zbb + custom-0 instruction-set simulator.
 - API: `iss_init(itcm, dtcm)` and `iss_step(&rec)`, which returns the expected retire record.
@@ -489,7 +491,7 @@ The detailed task-level plan (with "done" tests per task) is written next in `do
 | `rv_iss` is late, blocking `core_env` | Keep the ISS minimal and test it first. Interim: riscv-arch-test self-checking signatures as directed tests. |
 | Interface churn between tracks | Freeze §6 and §7.1 at the end of week 2. Changes after that need both students' sign-off and a spec update. |
 | DTCM WAR bugs in firmware | Software rule plus A-SOC-1, and a negative test that proves the assertion fires. |
-| Requant mismatch with golden | Formula fixed in §9.3; unit-test the firmware `requant()` on the host against the notebook's `requant` with the retrained `M`, `S`. |
+| Requant mismatch with golden | Formula fixed in §9.3; unit-test the firmware `requant()` on the host against `golden_int8.requant` with the retrained `M`, `S`. |
 | Schedule pressure | Protect the order D0 correct → D1 equivalent → switching activity → MNIST. 8×8 and pipelining are dropped first. |
 
 ## 16. Relation to CoralNPU (contribution boundary)

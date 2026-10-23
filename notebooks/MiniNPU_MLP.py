@@ -122,12 +122,23 @@ def _(mo):
 
 
 @app.cell
-def _(np):
-    INT32_MAX = 2**31 - 1
-
-    def quantize_input(p):
-        """Mục 4.1: x0 = (p * 254 + 255) // 510, kết quả trong 0..127."""
-        return ((p.astype(np.int32) * 254 + 255) // 510).astype(np.int8)
+def _(mo, np, os, sys):
+    # The integer golden math lives in model/py/golden_int8.py (decision D15, plan Task 2b): one
+    # definition with its own unit tests (python -m pytest model/py/tests -v). Only the float-side
+    # quantisation, which needs the trained weights, stays here.
+    _py_dir = os.path.normpath(os.path.join(str(mo.notebook_dir() or os.getcwd()), "..", "model", "py"))
+    if _py_dir not in sys.path:
+        sys.path.insert(0, _py_dir)
+    from golden_int8 import (
+        INT32_MAX,
+        IntModel,
+        compute_bound,
+        find_ms,
+        load_export,
+        quantize_input,
+        read_mem_int8,
+        requant,
+    )
 
     def quantize_weight(W):
         """Mục 4.2: quantize weight symmetric int8, không -128."""
@@ -141,36 +152,16 @@ def _(np):
         """Mục 4.2: b_q = round(b / (s_x * s_w))."""
         return np.round(b / (s_x * s_w)).astype(np.int32)
 
-    def compute_bound(w_q, b_q):
-        """Mục 4.5: B_j = sum_i |w_q[j][i]| * 127 + |b_q[j]|, bound = max_j B_j."""
-        abs_sum = np.sum(np.abs(w_q.astype(np.int64)), axis=1) * 127
-        total = abs_sum + np.abs(b_q.astype(np.int64))
-        return int(np.max(total))
-
-    def find_ms(real, bound):
-        """Mục 4.4: tìm S lớn nhất thỏa M >= 1 và bound*M + 2^(S-1) <= 2^31-1."""
-        for S in range(31, 0, -1):
-            M = int(np.round(real * (2 ** S)))
-            if M >= 1 and bound * M + (2 ** (S - 1)) <= INT32_MAX:
-                return M, S
-        raise ValueError(
-            f"find_ms: no S in 1..31 gives M >= 1 and bound*M + 2^(S-1) <= 2^31-1 "
-            f"(real={real}, bound={bound}); the layer scale or the weights are out of range"
-        )
-
-    def requant(acc, M, S):
-        """Mục 4.4: y = clamp((acc * M + 2^(S-1)) >> S, 0, 127)."""
-        scaled = acc.astype(np.int32) * np.int32(M) + np.int32(1 << (S - 1))
-        shifted = np.right_shift(scaled, S)
-        return np.clip(shifted, 0, 127).astype(np.int8)
-
     return (
         INT32_MAX,
+        IntModel,
         compute_bound,
         find_ms,
+        load_export,
         quantize_bias,
         quantize_input,
         quantize_weight,
+        read_mem_int8,
         requant,
     )
 
@@ -304,46 +295,6 @@ def _(
         return quant
 
     return (quantize_model,)
-
-
-@app.cell
-def _(np, requant):
-    class IntModel:
-        """Mô hình số nguyên chuẩn (golden model) theo mục 4."""
-
-        def __init__(self, quant, config):
-            self.quant = quant
-            self.config = config
-            self.n_layers = len(config.layer_sizes) - 1
-
-        def forward(self, x_int):
-            """
-            Chạy suy luận số nguyên.
-            x_int: (N, 784) int8
-            Trả về: dict chứa activation từng lớp, logit, nhãn
-            """
-            x = x_int.astype(np.int32)
-            result = {}
-
-            for i in range(self.n_layers):
-                w_q = self.quant[i]['w_q'].astype(np.int32)
-                b_q = self.quant[i]['b_q']
-                acc = x @ w_q.T + b_q
-
-                if i < self.n_layers - 1:
-                    M = self.quant[i]['M']
-                    S = self.quant[i]['S']
-                    y = requant(acc, M, S)
-                    result[f'act{i+1}'] = y
-                    x = y.astype(np.int32)
-                else:
-                    result['logit'] = acc
-
-            logits_10 = result['logit'][:, :10]
-            result['label'] = np.argmax(logits_10, axis=1)
-            return result
-
-    return (IntModel,)
 
 
 @app.cell
@@ -523,7 +474,7 @@ def _(
 
         # Integer model
         print("\n=== Bước 3: Mô hình số nguyên ===")
-        int_model = IntModel(quant, config)
+        int_model = IntModel(quant)
 
         # Test vectors
         print("\n=== Bước 4: Chọn test vector ===")
@@ -666,18 +617,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    INT32_MAX,
-    compute_bound,
-    find_ms,
-    hex_to_int32,
-    hex_to_int8,
-    int32_to_hex,
-    int8_to_hex,
-    np,
-    quantize_input,
-    requant,
-):
+def _(hex_to_int32, hex_to_int8, int32_to_hex, int8_to_hex, np):
     def test_matmul_int8():
         """Test: nhân ma trận int8 × int8 → int32 khớp vòng lặp viết tay."""
         x = np.array([[1, 2, -3, 4]], dtype=np.int8)
@@ -690,31 +630,6 @@ def _(
         assert np.array_equal(acc, expected), f"{acc} != {expected}"
         print("✓ test_matmul_int8")
 
-    def test_requant():
-        """Test: requant với đáp án tính sẵn."""
-        # acc=10, M=1, S=1: (10+1)>>1 = 5
-        assert requant(np.array([10], dtype=np.int32), 1, 1)[0] == 5
-        # acc=-5, M=1, S=1: (-5+1)>>1 = -2, clamp 0 (ReLU)
-        assert requant(np.array([-5], dtype=np.int32), 1, 1)[0] == 0
-        # acc=1000, M=1, S=3: (1000+4)>>3 = 125
-        assert requant(np.array([1000], dtype=np.int32), 1, 3)[0] == 125
-        # acc=2000, M=1, S=3: (2000+4)>>3 = 250, clamp 127
-        assert requant(np.array([2000], dtype=np.int32), 1, 3)[0] == 127
-        # acc=7, M=1, S=2: (7+2)>>2 = 2 (làm tròn ở biên)
-        assert requant(np.array([7], dtype=np.int32), 1, 2)[0] == 2
-        print("✓ test_requant")
-
-    def test_no_overflow():
-        """Test: input toàn 127 + trọng số cực trị không vượt bound."""
-        w_q = np.array([[127, 127, 127, -127],
-                        [-127, 127, -127, 127]], dtype=np.int8)
-        b_q = np.array([1000, -1000], dtype=np.int32)
-        bound = compute_bound(w_q, b_q)
-        # B_j = (127+127+127+127)*127 + 1000 = 508*127 + 1000 = 65516
-        assert bound == 65516, f"Expected 65516, got {bound}"
-        assert bound <= INT32_MAX
-        print("✓ test_no_overflow")
-
     def test_padding():
         """Test: đệm 10→12 không đổi argmax."""
         logits = np.array([[5, 3, 8, 1, 2, 6, 4, 7, 0, 9]], dtype=np.int32)
@@ -722,33 +637,6 @@ def _(
         label = np.argmax(padded[:, :10], axis=1)
         assert label[0] == 9, f"Expected 9, got {label[0]}"
         print("✓ test_padding")
-
-    def test_input_quant():
-        """Test: quantize input."""
-        assert quantize_input(np.array([0]))[0] == 0
-        assert quantize_input(np.array([255]))[0] == 127
-        assert quantize_input(np.array([2]))[0] == 1
-        print("✓ test_input_quant")
-
-    def test_find_ms():
-        """Test: tìm (M, S) không tràn."""
-        M, S = find_ms(0.5, 1000)
-        assert M >= 1
-        assert 1000 * M + (2 ** (S - 1)) <= INT32_MAX
-        # S must be the largest one: the next S breaks the no-overflow condition (section 4.4)
-        M_next = int(np.round(0.5 * 2 ** (S + 1)))
-        assert 1000 * M_next + 2 ** S > INT32_MAX
-        print(f"✓ test_find_ms: M={M}, S={S}")
-
-    def test_find_ms_rejects_impossible():
-        """Test: when no (M, S) is valid, find_ms raises instead of returning a wrong answer."""
-        for real, bound in [(3000.0, 10**6), (1e-12, 10**6)]:
-            try:
-                find_ms(real, bound)
-            except ValueError:
-                continue
-            raise AssertionError(f"find_ms({real}, {bound}) must raise ValueError")
-        print("✓ test_find_ms_rejects_impossible")
 
     def test_hex_conversion():
         """Test: chuyển đổi hex."""
@@ -765,12 +653,7 @@ def _(
         print("✓ test_hex_conversion")
 
     test_matmul_int8()
-    test_requant()
-    test_no_overflow()
     test_padding()
-    test_input_quant()
-    test_find_ms()
-    test_find_ms_rejects_impossible()
     test_hex_conversion()
     print("\n✓ Tất cả test đơn vị passed!")
     return
@@ -788,59 +671,21 @@ def _(mo):
 
 
 @app.cell
-def _(
-    IntModel,
-    cfg,
-    hashlib,
-    hex_to_int32,
-    hex_to_int8,
-    json,
-    mo,
-    np,
-    os,
-    results,
-):
+def _(IntModel, cfg, hashlib, json, load_export, mo, np, os, read_mem_int8, results):
     def test_roundtrip(config):
         """Test: đọc lại file xuất, tính lại logit, khớp bit-chính-xác."""
         export_dir = config.export_dir
-        n_layers = len(config.layer_sizes) - 1
-
-        # Đọc weight và bias
-        quant_loaded = {}
-        for i in range(n_layers):
-            with open(os.path.join(export_dir, f'fc{i+1}_weight.mem')) as f:
-                lines = f.read().strip().split('\n')
-            w_vals = [hex_to_int8(l) for l in lines]
-            out_size = config.layer_sizes[i+1] if i < n_layers - 1 else config.fc3_pad
-            in_size = config.layer_sizes[i]
-            w_q = np.array(w_vals, dtype=np.int8).reshape(out_size, in_size)
-
-            with open(os.path.join(export_dir, f'fc{i+1}_bias.mem')) as f:
-                lines = f.read().strip().split('\n')
-            b_q = np.array([hex_to_int32(l) for l in lines], dtype=np.int32)
-
-            quant_loaded[i] = {'w_q': w_q, 'b_q': b_q}
-
-        # Đọc requant.json
-        with open(os.path.join(export_dir, 'requant.json')) as f:
-            requant_data = json.load(f)
-        for i in range(n_layers - 1):
-            quant_loaded[i]['M'] = requant_data[f'fc{i+1}']['M']
-            quant_loaded[i]['S'] = requant_data[f'fc{i+1}']['S']
-        quant_loaded[n_layers - 1]['M'] = None
-        quant_loaded[n_layers - 1]['S'] = None
+        quant_loaded, _ = load_export(export_dir)
 
         # Đọc input
-        with open(os.path.join(export_dir, 'testvec_input.mem')) as f:
-            lines = f.read().strip().split('\n')
-        input_vals = [hex_to_int8(l) for l in lines]
-        test_input = np.array(input_vals, dtype=np.int8).reshape(config.n_test_vectors, config.layer_sizes[0])
+        test_input = read_mem_int8(os.path.join(export_dir, 'testvec_input.mem')).reshape(
+            config.n_test_vectors, config.layer_sizes[0])
 
         # Đọc expected
         expected = np.load(os.path.join(export_dir, 'testvec_expected.npz'))
 
         # Chạy int model với dữ liệu đọc lại
-        int_model_loaded = IntModel(quant_loaded, config)
+        int_model_loaded = IntModel(quant_loaded)
         result = int_model_loaded.forward(test_input)
 
         # Kiểm tra bit-chính-xác
@@ -929,56 +774,16 @@ def _(mo):
 
 
 @app.cell
-def _(IntModel, cfg, hex_to_int32, hex_to_int8, json, mo, np, os, results):
+def _(IntModel, cfg, load_export, mo, np, os, read_mem_int8, results):
     def load_model_from_files(config):
         """Load toàn bộ model từ file xuất trong export_dir."""
         export_dir = config.export_dir
-        n_layers = len(config.layer_sizes) - 1
-
-        quant_loaded = {}
-        for i in range(n_layers):
-            # Đọc weight
-            with open(os.path.join(export_dir, f'fc{i+1}_weight.mem')) as f:
-                lines = f.read().strip().split('\n')
-            w_vals = [hex_to_int8(l) for l in lines]
-            out_size = config.layer_sizes[i+1] if i < n_layers - 1 else config.fc3_pad
-            in_size = config.layer_sizes[i]
-            w_q = np.array(w_vals, dtype=np.int8).reshape(out_size, in_size)
-
-            # Đọc bias
-            with open(os.path.join(export_dir, f'fc{i+1}_bias.mem')) as f:
-                lines = f.read().strip().split('\n')
-            b_q = np.array([hex_to_int32(l) for l in lines], dtype=np.int32)
-
-            quant_loaded[i] = {'w_q': w_q, 'b_q': b_q}
-
-        # Đọc requant.json
-        with open(os.path.join(export_dir, 'requant.json')) as f:
-            requant_data = json.load(f)
-        for i in range(n_layers - 1):
-            quant_loaded[i]['M'] = requant_data[f'fc{i+1}']['M']
-            quant_loaded[i]['S'] = requant_data[f'fc{i+1}']['S']
-        quant_loaded[n_layers - 1]['M'] = None
-        quant_loaded[n_layers - 1]['S'] = None
-
-        # Đọc test input
-        with open(os.path.join(export_dir, 'testvec_input.mem')) as f:
-            lines = f.read().strip().split('\n')
-        input_vals = [hex_to_int8(l) for l in lines]
-        test_input = np.array(input_vals, dtype=np.int8).reshape(
+        quant_loaded, manifest = load_export(export_dir)
+        test_input = read_mem_int8(os.path.join(export_dir, 'testvec_input.mem')).reshape(
             config.n_test_vectors, config.layer_sizes[0]
         )
-
-        # Đọc expected
         expected = np.load(os.path.join(export_dir, 'testvec_expected.npz'))
-
-        # Đọc manifest
-        with open(os.path.join(export_dir, 'manifest.json')) as f:
-            manifest = json.load(f)
-
-        int_model_loaded = IntModel(quant_loaded, config)
-
-        return int_model_loaded, test_input, expected, manifest
+        return IntModel(quant_loaded), test_input, expected, manifest
 
     mo.stop(results is None, mo.md("⏭ Load model: bỏ qua (pipeline chưa chạy hoặc PyTorch không có sẵn)"))
     model_loaded, test_inputs, test_expected, manifest_loaded = load_model_from_files(cfg)

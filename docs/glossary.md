@@ -181,7 +181,7 @@ Mục lục: [1. Kiến trúc tổng thể](#1-kiến-trúc-tổng-thể) · [2.
 | **Reactive agent / Responder** | Agent trả lời yêu cầu của DUT thay vì chủ động gửi. | `dtcm_agent` giả lập port B. |
 | **Scoreboard** (UVM) | Thành phần so sánh kết quả DUT với kết quả mong đợi. | So READ_RESULT với `npu_ref`. |
 | **Predictor / Reference model** | Mô hình tính kết quả mong đợi. | `npu_ref.c` qua DPI-C. |
-| **Golden model** | Mô hình được tin là đúng, dùng làm chuẩn so sánh. | `npu_ref.c`, `rv_iss.c`, notebook int8. |
+| **Golden model** | Mô hình được tin là đúng, dùng làm chuẩn so sánh. | `npu_ref.c`, `rv_iss.c`, `golden_int8.py`. |
 | **Oracle** | Cái quyết định kết quả đúng là gì. | Golden model đóng vai oracle. |
 | **ISS** (Instruction Set Simulator) | Chương trình mô phỏng từng lệnh ở mức ISA, không có timing. | `rv_iss.c`; ISS Python trong `run.py`. |
 | **Lockstep** | Chạy DUT và ISS song song, so từng lệnh retire. | `core_env` và `soc_env`. |
