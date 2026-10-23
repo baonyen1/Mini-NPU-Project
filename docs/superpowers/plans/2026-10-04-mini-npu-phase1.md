@@ -53,7 +53,7 @@
 2. **x0 as destination of new instructions:** `mul x0,…`, `csrrw x0,…` and `READ_RESULT x0,…` must not write x0. The CSR write and the READ_RESULT drain must still happen. Tests: Task 5 `mul_x0`, Task 6 `csrrw_x0_still_writes_csr`, Task 9 `read_result_x0_still_drains`.
 3. **CSR read right after a write:** `csrw` followed immediately by `csrr` of the same CSR, and an ALU instruction consuming a CSR result in the next slot. Expected: the new value, through forwarding. Test: Task 6 `csr_raw_back_to_back`.
 4. **Address-range overflow on LOAD:** `a + 4K` can wrap past 2³² (e.g. `a = 0xFFFF_FFF0`, `K = 8`). Expected: `err_addr`, command dropped. The check must not use 32-bit wrapped arithmetic. Tests: Task 10 `load_addr_wraps_32bit`, Task 11 `load_addr_wraps_32bit`.
-5. **`COMPUTE` with K = 0 and clr = 1:** K = 0 is a no-op for every op (§6.3), so the accumulator is **not** cleared. Tests: Task 10 `compute_k0_clr_keeps_acc`, Task 11 the same.
+5. **`COMPUTE` with K = 0 and clr = 1:** K = 0 is a no-op for LDW, LDI and MAC (§6.3, D16), so the accumulator is **not** cleared. Tests: Task 10 `compute_k0_clr_keeps_acc`, Task 11 the same.
 
 ---
 

@@ -74,6 +74,7 @@ All of it is verified with a self-built **SystemVerilog UVM** environment. It mu
 | D9 | Clock gating is gated by hardware-detected idle on the MAC engine only. | Coral gates the whole core on WFI/CSR (`CoreAxi.scala`). Finer granularity is our contribution. |
 | D14 | The retrained model export lives in `model/py/export/` and is committed: `fc{1,2,3}_weight.mem`, `fc{1,2,3}_bias.mem`, `requant.json`, `testvec_input.mem`, `testvec_expected.npz`, `manifest.json` (per-file SHA-256). The notebook writes it there. Track B decision 2026-10-21 (Bảo). | One frozen model for `pack_weights.py`, the golden files and the export-hash check (Phase 4 Tasks 25 and 27); matches the `model/py/` tree. |
 | D15 | The integer golden for the MLP is `model/py/golden_int8.py` (pure numpy: `quantize_input`, `requant`, `find_ms`, `compute_bound`, `IntModel`, `load_export`). It has its own unit tests and is cross-checked against `npu_ref`; the notebook imports it instead of keeping a copy. Created by Phase 1 Task 2b. Track B decision 2026-10-21 (Bảo). | SC5 names `golden_int8.py` but no task created it. A notebook cannot be imported without marimo and torch, and §10.2 allows an oracle only after its own unit tests pass. |
+| D16 | A command with op `ILLEGAL` is decided from `op` alone: the engine sets `err_illegal` and nothing else, even when K = 0, K > KMAX, K is not a multiple of 4 or the address is bad. The check order in `CHECK` is: ILLEGAL, K = 0, K range and multiple of 4, then for LOAD alignment, then address range. Track B decision 2026-10-23 (Bảo, option A); Tấn confirms by signing the §6 freeze. | The core pushes ILLEGAL with whatever `rs1`/`rs2` hold, so K and the address of an ILLEGAL command are arbitrary. If K = 0 won, a reserved `funct3` with `rs2 = 0` would be swallowed silently and the software error would stay hidden. Tests: `npu_ref` `test_illegal_op`, `test_illegal_wins_over_other_checks`; the Task 11 test `t_illegal` must cover K = 0, K = 6, K = 1028 and a bad address. |
 
 ### 3.2 Open (the team decides; the default is used if no decision is recorded by the end of week 2)
 
@@ -196,11 +197,11 @@ All four instructions use opcode **custom-0 = `0001011`** in R-type format.
 
 | Condition | Effect |
 |---|---|
-| K = 0 (any op) | no operation, no error |
+| K = 0 (LDW, LDI or MAC; not ILLEGAL, see D16) | no operation, no error |
 | K > KMAX, or K not a multiple of 4 | dropped, `err_k` ← 1 |
 | LOAD with `a[3:0] ≠ 0` | dropped, `err_align` ← 1 |
 | LOAD with `a < DTCM_BASE` or `a + 4K > DTCM_BASE + DTCM_BYTES` (computed without 32-bit wrap) | dropped, `err_addr` ← 1 |
-| funct3 ∈ {100..111} | the core pushes op `ILLEGAL`; the engine sets `err_illegal` ← 1 |
+| funct3 ∈ {100..111} | the core pushes op `ILLEGAL`; the engine sets `err_illegal` ← 1 and nothing else, whatever K, `cmd_addr` and clr the command carries (D16) |
 | READ_RESULT with `rs1[31:4] ≠ 0` | upper bits ignored, no error |
 
 ### 6.4 CSRs
