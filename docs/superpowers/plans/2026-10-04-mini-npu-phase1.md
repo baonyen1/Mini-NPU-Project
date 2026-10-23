@@ -23,7 +23,7 @@
 |---|---|---|
 | 0 · Tool gate | Tấn: S1 UVM, S3 coverage, S5 toolchain, S6 xsim · Bảo: S2 DPI-C, S4 Verilator ICG, S7 VCD by scope | closed 2026-10-18: S1–S3, S5–S7 pass (`docs/smoke/results.md`); S4 Verilator part skipped by team decision |
 | 1 · Core cleanup | Track A | done (`69cd798`) |
-| 2 · Week-2 freeze | both (Tấn: `docs/core_isa.md`, W2-1; Bảo: `npu_pkg.sv`, notebook retrain; both sign §6/§7.1) | open |
+| 2 · Week-2 freeze | both (Tấn: `docs/core_isa.md`, W2-1; Bảo: `npu_pkg.sv`, notebook retrain; both sign §6/§7.1) | open. `rtl/top/npu_pkg.sv` written 2026-10-23 (Verilator lint clean; Questa `vlog` still to run); notebook export (D14) and the sign-off remain |
 | 2b · `golden_int8.py` | Bảo | open; added and decided 2026-10-21 (spec D14, D15) |
 | 3 · Complete RV32I | Track A (Tấn takes over, handover step below) | done (`c413abd`) |
 | 4 · Extend reference ISS | Claude **[support]** | done (`0d7b38c`, 2026-10-20) |
@@ -129,7 +129,7 @@
 - Produces: `npu_pkg` (imported by every SV file in `rtl/npu`, `rtl/top` and `tb/`); frozen spec §6 and §7.1.
 
 - [ ] **Step 1:** Retrain `notebooks/MiniNPU_MLP.py` with `layer_sizes=[784, 64, 32, 10]` (spec model). Set `Config.export_dir` to `model/py/export` (D14), resolved from the notebook's own folder so it does not depend on the kernel's working directory, and run the pipeline from the marimo UI. The export holds weights, biases, `requant.json`, test vectors and `manifest.json`. Check the exported `M`, `S` against the §9.3 rule (largest `S` with `bound·M + 2^(S−1) ≤ 2³¹−1`) and record the per-layer `M`, `S` and the float/int8 accuracy in spec §3.2 O2. Commit the export with that spec edit; in the same commit remove the "export not committed yet" notes from spec §9.2, from the spec's known-issues table and from `CLAUDE.md` §10: `feat(model): retrained 784-64-32-10 export`.
-- [ ] **Step 2:** Write `docs/core_isa.md` and `rtl/top/npu_pkg.sv`. `npu_pkg.sv` must compile: run `vlog -sv rtl/top/npu_pkg.sv` on QuestaSim (clean) and `verilator --lint-only -Wall rtl/top/npu_pkg.sv` (clean).
+- [ ] **Step 2:** Write `docs/core_isa.md` and `rtl/top/npu_pkg.sv`. `npu_pkg.sv` must compile: run `vlog -sv rtl/top/npu_pkg.sv` on QuestaSim (clean) and `verilator --lint-only -Wall` on it (clean). A package alone has no top module and Verilator 5.020 rejects it, so lint it together with any module that imports it (a throwaway wrapper for now, `rtl/npu/*.sv` from Task 11).
 - [ ] **Step 3:** Both students read §6 and §7.1 and sign off in the spec header ("Frozen 2026-10-xx by A, B"). From this point, changes need both signatures.
 - [ ] **Step 4: Commit** `docs: freeze ISA and engine interface`.
 

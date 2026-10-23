@@ -434,7 +434,7 @@ Every soc test and every MNIST run is executed in both configurations. Any diffe
 
 ```
 mini-npu/
-  rtl/{core,npu,mem,top}/   rtl/npu/icg_cell.sv   rtl/npu_pkg.sv
+  rtl/{core,npu,mem,top}/   rtl/npu/icg_cell.sv   rtl/top/npu_pkg.sv
   tb/uvm/{common,mac_env,core_env,soc_env,tb}/   tb/sva/
   model/c/{npu_ref.c,rv_iss.c,tests/}   model/py/{golden_int8.py,pack_weights.py,gen_matmul.py}
   sw/{crt0.S,link.ld,npu.h,tests/,mnist/,synthetic/}
