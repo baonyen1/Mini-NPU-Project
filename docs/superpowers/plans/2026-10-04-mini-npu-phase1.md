@@ -28,7 +28,7 @@
 | 3 · Complete RV32I | Track A (Tấn takes over, handover step below) | done (`c413abd`) |
 | 4 · Extend reference ISS | Claude **[support]** | done (`0d7b38c`, 2026-10-20) |
 | 5, 6, 7, 9, 12 · M, Zicsr, Zifencei/Zbb, custom-0 push, `rv_iss.c` | Tấn | implemented by Claude at Tấn's request, 2026-10-20: 5 `040e81c`, 6 `ef773fc`, 7 `3d4fede`, 9 `95e5091`, 12 `fbc3fd5`. **Tấn must still review and be able to defend them** (report: `docs/reports/2026-10-20-track-a-phase1.md`). |
-| 8 · ITCM/DTCM/MMIO/RVVI | Tấn: core LSU, ITCM, SIM MMIO, RVVI · Bảo: `dtcm_dp` (port B is the engine's interface) | Tấn's part done (`6280c97`, 2026-10-20) on a port-A stand-in DTCM; `dtcm_dp` and the test `dtcm_port_b_quad` are open (Bảo) |
+| 8 · ITCM/DTCM/MMIO/RVVI | Tấn: core LSU, ITCM, SIM MMIO, RVVI · Bảo: `dtcm_dp` (port B is the engine's interface) | Tấn's part done (`6280c97`, 2026-10-20) on a port-A stand-in DTCM; `dtcm_dp` written 2026-10-23 (`rtl/mem/dtcm_dp.sv`, test `tb/directed/dtcm_dp_tb.sv` incl. `dtcm_last_word` and `dtcm_port_b_quad`, `make -C sim/verilator test_dtcm_dp`); swapping it into `core_tb_top` in place of the stand-in is Tấn's call |
 | 10, 11 · `npu_ref.c`, `mac_engine` D0 | Bảo | 10 done 2026-10-17, 11 open |
 
 **Handover (Tấn, before Task 5):** the Task 3 RTL was written by Claude and the core history is Bảo's. Tấn reads `docs/core_isa.md` and `docs/core_stall.md`, runs `python tools/rv32i_check/run_all.py` (expected: ISA 44/44, hazard 25/25, random 300/300), then explains each Task 3 change to Bảo. Done when Tấn can trace one `jalr` and one load-use stall through the pipeline without notes.

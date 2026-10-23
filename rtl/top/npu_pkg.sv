@@ -1,3 +1,5 @@
+`timescale 1ns / 1ps
+
 // npu_pkg.sv - shared parameters, engine op codes and CSR addresses.
 //
 // Spec: docs/superpowers/specs/2026-10-04-mini-npu-design.md
@@ -10,6 +12,10 @@
 // builds, so it is a module parameter of mac_engine / npu_top (plan Task 11).
 
 package npu_pkg;
+
+  // A package is a library: any one consumer uses only some of its constants, so Verilator's
+  // UNUSEDPARAM is waived here (the only waiver in this file).
+  /* verilator lint_off UNUSEDPARAM */
 
   // ---- 4.2 parameters --------------------------------------------------------
   localparam int unsigned PE_ROWS    = 4;      // N: output rows per tile
@@ -27,6 +33,7 @@ package npu_pkg;
   localparam int unsigned BUF_DEPTH   = KMAX / K_DOT;          // 256 quads per WBUF / IBUF
   localparam int unsigned BUF_IDX_W   = $clog2(BUF_DEPTH);     // 8
   localparam int unsigned DTCM_QUADS  = DTCM_BYTES / QUAD_BYTES; // 4096
+  localparam int unsigned WORD_ADDR_W = $clog2(DTCM_BYTES / 4); // 14: DTCM port A word index a_addr[13:0]
   localparam int unsigned QUAD_ADDR_W = $clog2(DTCM_QUADS);    // 12: b_addr[11:0]
   localparam int unsigned RD_IDX_W    = $clog2(PE_ROWS * PE_COLS); // 4: rd_idx[3:0], idx = 4*i + j
 
@@ -55,5 +62,7 @@ package npu_pkg;
   localparam logic [31:0] ST_ERR_MASK =
       (32'd1 << ST_ERR_K) | (32'd1 << ST_ERR_ADDR) |
       (32'd1 << ST_ERR_ILLEGAL) | (32'd1 << ST_ERR_ALIGN);
+
+  /* verilator lint_on UNUSEDPARAM */
 
 endpackage : npu_pkg

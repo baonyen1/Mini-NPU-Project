@@ -35,6 +35,7 @@ Mục lục: [1. Kiến trúc tổng thể](#1-kiến-trúc-tổng-thể) · [2.
 | **Dual-port** | Bộ nhớ có 2 cổng truy cập cùng lúc. | Port A cho core, port B cho engine. |
 | **Bank** | Bộ nhớ chia thành nhiều khối nhỏ để đọc song song. | DTCM 4 bank × 32 bit; port B đọc cả 4 bank một lúc = 128 bit. |
 | **Port A / Port B** | Hai cổng của DTCM. | A: 32 bit đọc/ghi, của core. B: 128 bit chỉ đọc, của engine. |
+| **dtcm_dp** | Module RTL của DTCM hai cổng (dp = dual-port). | `rtl/mem/dtcm_dp.sv`. Đọc có độ trễ 1 chu kỳ; đọc và ghi cùng một word trong cùng chu kỳ thì đọc ra giá trị cũ. |
 | **Word / Quad** | Word = 32 bit = 4 byte. Quad = 4 word = 16 byte. | Một lần đọc port B = 1 quad = 1 entry của WBUF/IBUF. |
 | **Alignment** (căn chỉnh) | Địa chỉ phải chia hết cho kích thước dữ liệu. | Lệnh LOAD cần địa chỉ chia hết cho 16, nếu không bật `err_align`. |
 | **Memory map** | Bảng phân vùng địa chỉ. | Spec §4.1. |

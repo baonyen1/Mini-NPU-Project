@@ -90,6 +90,7 @@ $env:RV_PREFIX = "riscv-none-elf-"         # only if the binutils prefix is not 
 # Golden-model unit tests (needs gcc and make)
 make -C model/c test                       # npu_ref (Task 10) and rv_iss (Task 12)
 make -C model/c xcheck                     # rv_iss vs the Python RefISS on every rv32i_check program (run run_all.py first)
+make -C sim/verilator test_dtcm_dp         # dtcm_dp directed test, twice (empty memory, +DTCM fixture); Linux/WSL, needs Verilator
 
 # Finish a task: regression -> commit -> rebase on the teammate's work -> regression -> push
 .\tools\finish_task.ps1 -Message "feat(core): M extension"
@@ -102,7 +103,7 @@ tools/finish_task.sh "feat(core): M extension"               # Linux/macOS; SKIP
 - Team workflow: each finished task is pushed right away, to `main` (section 3). When a task's "done" tests pass, remind the student to finish it with the script.
 - CI does not run `make -C model/c test` yet. ⚠️ unverified: its Makefile builds with `-fsanitize=address,undefined`, which MinGW gcc on Windows may not support. If linking fails, run it under WSL/Linux, or override `CFLAGS` without the sanitizers.
 - These are planned but not in the repo yet:
-  - `sim/questa/run_mac_directed` and `make -C sim/verilator lint` (Task 11)
+  - `sim/questa/run_mac_directed` (Task 11); `make -C sim/verilator lint` exists for `npu_pkg` + `dtcm_dp` and gains `rtl/npu/*.sv` in Task 11
   - `run.py --simulator {questa,xsim} --target <test|suite> [--config d0|d1] [--seeds N]` (Task 15)
 - Check that a file exists before telling anyone to run it.
 - Do not guess QuestaSim or xsim flags. Use the ones `docs/smoke/results.md` records once Task 0 is done.
@@ -196,7 +197,7 @@ This is a small design *inspired by* CoralNPU (`google-coral/coralnpu`, commit `
 - `model/c` holds `npu_ref` (Task 10, done 2026-10-17): `make -C model/c test` is green. `ILLEGAL` wins over every other check, `K = 0` included (spec D16, decided 2026-10-23, Tấn confirms with the §6 freeze); RTL (Task 11) must follow. `rv_iss.c` exists (Task 12, done 2026-10-20).
 - QuestaSim 10.7c runs UVM, `randomize`, `covergroup` and DPI-C (Task 0, 2026-10-17; `docs/smoke/results.md`). Start it with `C:\questasim64_10.7c\win64` on PATH; use `-voptargs=+acc` whenever a VCD or waveform needs inner scopes. A DPI function cannot return `bit [31:0]` (use `int unsigned` or an output argument). Verilator is not installed on Bảo's machine; S4 (Verilator ICG) was skipped on 2026-10-18, so lint and the `icg_cell` pragma under Verilator are untested. xsim is a verified fallback.
 - `tools/rv32i_check` builds `rtl/core/**/*.v` plus an explicit list in `run.py` (`core_tb_top.sv`, `core_tb_dtcm.sv`, `npu_stub.sv`, `rtl/mem/itcm.sv`) with `iverilog -g2012`. A new `.sv` file, or one that imports `npu_pkg`, is not picked up until that list is updated ([support]).
-- Since Task 8 the harness runs the core on the spec memory map (ITCM 16 KB, DTCM 64 KB at `0x0001_0000`, SIM MMIO) in `rtl/top/core_tb_top.sv`; the DTCM is a port-A stand-in (`core_tb_dtcm.sv`) until Bảo's `dtcm_dp` exists. Every `compare()` also checks the whole RVVI retire trace against `RefISS`. It also requires the RTL to retire the program's `end: j end` (a core that stalls forever mid-program must fail) and compares the engine-stub CSRs (`npu_err`, `npu_busy_cyc`). `rtl/fpga/RISC_V_Fixed_Impl_Top.v` (parked) instantiates the old core ports and no longer matches `RISC_V_Top`.
+- Since Task 8 the harness runs the core on the spec memory map (ITCM 16 KB, DTCM 64 KB at `0x0001_0000`, SIM MMIO) in `rtl/top/core_tb_top.sv`; the DTCM is still the port-A stand-in `core_tb_dtcm.sv`, although `rtl/mem/dtcm_dp.sv` now exists (2026-10-23; drop-in checked, see the Task 8 row of the Phase 1 plan). The swap changes `core_tb_top.sv` (instance and `peek`), `tb_dump.v` (`mem[k]` becomes `peek(k)`) and the file list in `run.py`. Every `compare()` also checks the whole RVVI retire trace against `RefISS`. It also requires the RTL to retire the program's `end: j end` (a core that stalls forever mid-program must fail) and compares the engine-stub CSRs (`npu_err`, `npu_busy_cyc`). `rtl/fpga/RISC_V_Fixed_Impl_Top.v` (parked) instantiates the old core ports and no longer matches `RISC_V_Top`.
 - `fence`, `ecall`, `ebreak` and unknown encodings execute as NOP until decision W2-1 is recorded (`docs/core_isa.md` §4).
 - The core uses active-high `reset`, while the engine interface (spec §7.1) uses `rst_n`. Change neither without a team decision at `npu_top`.
 - `npu_pkg.sv` lives in `rtl/top/` (2026-10-23; spec §12 fixed). A package alone has no top module, so `verilator --lint-only` and `iverilog` need a module that imports it. `GATING_EN` is a module parameter of `mac_engine`/`npu_top`, not a package constant.
