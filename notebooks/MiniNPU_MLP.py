@@ -9,7 +9,7 @@ def _(cfg, mo):
     mo.md(f"""
     # MLP MNIST 3 lớp lượng tử hóa int8 cho Mini-NPU
 
-    **Ngày:** 2026-09-28 | **Trạng thái:** chờ duyệt
+    **Ngày:** 2026-09-28 | **Trạng thái:** đã duyệt (2026-10-26)
     **Dự án:** Đồ án 2 – Mini-NPU RISC-V (cấu hình D0/D1)
 
     ## Kiến trúc mô hình
