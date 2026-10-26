@@ -23,15 +23,32 @@
 |---|---|---|
 | 0 · Tool gate | Tấn: S1 UVM, S3 coverage, S5 toolchain, S6 xsim · Bảo: S2 DPI-C, S4 Verilator ICG, S7 VCD by scope | closed 2026-10-18: S1–S3, S5–S7 pass (`docs/smoke/results.md`); S4 Verilator part skipped by team decision |
 | 1 · Core cleanup | Track A | done (`69cd798`) |
-| 2 · Week-2 freeze | both (Tấn: `docs/core_isa.md`, W2-1; Bảo: `npu_pkg.sv`, notebook retrain; both sign §6/§7.1) | open. `rtl/top/npu_pkg.sv` written 2026-10-23 (Verilator lint clean; QuestaSim 10.7c `vlog -sv` clean 2026-10-24, 0 errors 0 warnings); retrained export committed 2026-10-23 (D14, spec O1/O2 closed); only the §6/§7.1 sign-off remains (freeze proposed 2026-10-24 in the spec header, D17/D18) |
+| 2 · Week-2 freeze | both (Tấn: `docs/core_isa.md`, W2-1; Bảo: `npu_pkg.sv`, notebook retrain; both sign §6/§7.1) | open. `rtl/top/npu_pkg.sv` written 2026-10-23 (Verilator lint clean; QuestaSim 10.7c `vlog -sv` clean 2026-10-24, 0 errors 0 warnings); retrained export committed 2026-10-23 (D14, spec O1/O2 closed); only the §6/§7.1 sign-off remains: Bảo signed 2026-10-26, Tấn pending, and Task 11 does not wait for it (spec D20; freeze proposed 2026-10-24, D17–D19) |
 | 2b · `golden_int8.py` | Bảo | done 2026-10-23 (`model/py/golden_int8.py`, 13 tests incl. the `npu_ref` tile cross-check; notebook imports it, export bytes unchanged) |
 | 3 · Complete RV32I | Track A (Tấn takes over, handover step below) | done (`c413abd`) |
 | 4 · Extend reference ISS | Claude **[support]** | done (`0d7b38c`, 2026-10-20) |
 | 5, 6, 7, 9, 12 · M, Zicsr, Zifencei/Zbb, custom-0 push, `rv_iss.c` | Tấn | implemented by Claude at Tấn's request, 2026-10-20: 5 `040e81c`, 6 `ef773fc`, 7 `3d4fede`, 9 `95e5091`, 12 `fbc3fd5`. **Tấn must still review and be able to defend them** (report: `docs/reports/2026-10-20-track-a-phase1.md`). |
 | 8 · ITCM/DTCM/MMIO/RVVI | Tấn: core LSU, ITCM, SIM MMIO, RVVI · Bảo: `dtcm_dp` (port B is the engine's interface) | Tấn's part done (`6280c97`, 2026-10-20) on a port-A stand-in DTCM; `dtcm_dp` written 2026-10-23 (`rtl/mem/dtcm_dp.sv`, test `tb/directed/dtcm_dp_tb.sv` incl. `dtcm_last_word` and `dtcm_port_b_quad`, `make -C sim/verilator test_dtcm_dp`); swapping it into `core_tb_top` in place of the stand-in is Tấn's call |
-| 10, 11 · `npu_ref.c`, `mac_engine` D0 | Bảo | 10 done 2026-10-17, 11 open |
+| 10, 11 · `npu_ref.c`, `mac_engine` D0 | Bảo | 10 done 2026-10-17; 11 open, starts on the proposed freeze (D20), build order in the Task 11 section |
 
 **Handover (Tấn, before Task 5):** the Task 3 RTL was written by Claude and the core history is Bảo's. Tấn reads `docs/core_isa.md` and `docs/core_stall.md`, runs `python tools/rv32i_check/run_all.py` (expected: ISA 44/44, hazard 25/25, random 300/300), then explains each Task 3 change to Bảo. Done when Tấn can trace one `jalr` and one load-use stall through the pipeline without notes.
+
+**Next actions (set 2026-10-26 by Bảo).** Each student works from this list; "done when" names the test or file that proves the item. Nothing here waits for a sign-off (spec D20).
+
+*Tấn (Track A), in order:*
+
+1. **Handover review** (paragraph above), now covering Tasks 5, 6, 7, 9 and 12 as well. Read `docs/reports/2026-10-20-track-a-phase1.md`, then be ready to explain the Review Focus tests: `div_in_branch_shadow`, `mul_x0` (`tests_m.py`), `csrrw_x0_still_writes_csr`, `csr_raw_back_to_back` (`tests_csr.py`), `push_in_branch_shadow`, `read_result_x0_still_drains` (`tests_custom.py`). Done when: for each one he can say which stall or flush source wins, and why the younger instruction does not write back or push, without notes.
+2. **Record W2-1** (illegal and unsupported instructions, out-of-range access). The options are in `docs/core_isa.md` §4; Tấn drafts it (Task 2 row) and both sign. Done when: the chosen option and its date are written in `docs/core_isa.md` §4, in spec §4.1 and in the spec decision log, and `rvvi_trap`, `rv_iss` and `RefISS` follow it. Until then `fence`, `ecall`, `ebreak` and unknown encodings stay NOPs.
+3. **Review §6/§7.1 against the core** and tick his box in the spec header, or write the change he wants as a dated spec entry. He checks three things: D16 (the core pushes op ILLEGAL with whatever `rs1`/`rs2` hold; test `illegal_funct3`), D17 (the CSR write value and the `csr_we` rule match `CSR_Unit.v`; tests `csr_ops_all6`, `csrrw_x0_still_writes_csr`), D18 (the reset synchronizer lives in `npu_top`, Phase 2 Task 14). This is not a gate for Task 11 (D20).
+4. **Swap `dtcm_dp` into `core_tb_top.sv`** in place of the port-A stand-in `core_tb_dtcm.sv` (Task 8 row; his call whether to do it now or in Task 14). It changes the instance and `peek` in `core_tb_top.sv`, `mem[k]` to `peek(k)` in `tb_dump.v`, and the file list in `run.py` ([support]: Claude can do those two on request). Done when: `python tools/rv32i_check/run_all.py` ends with `RESULT: PASS`.
+5. **Start Phase 2 Task 13** (firmware base). It runs on `core_tb_top` with the engine stub and does not use the engine RTL, so it can start once items 1–3 are done.
+
+*Bảo (Track B), in order:*
+
+1. **Task 11**, in the build order given in that task. It uses the behavioural `dtcm_model.sv` and `npu_ref`, so it does not need Tấn's core.
+2. **Phase 2 Task 16** (`mac_env` skeleton) once Task 11 Step 4 is green, and **Task 14** (`npu_top`, engine side) together with Tấn.
+
+*Joint:* nothing is blocked. The Phase 1 exit checklist at the end of this plan stays the definition of "Phase 1 done"; its "Spec frozen" line needs both ticks.
 
 ## Global Constraints
 
@@ -390,7 +407,7 @@ Added 2026-10-21 (spec D14, D15). SC5 and Phase 4 name `golden_int8.py`, but no 
 **Files:**
 - Create: `rtl/npu/mac_engine.sv`, `rtl/npu/cmd_fifo.sv`, `rtl/npu/pe_array.sv` (16 dot4 PEs), `rtl/prim/npu_clk_gate.sv` (with `GATING_EN=0` it ties `en` to 1, §8, D19)
 - Create: `tb/directed/mac_engine_tb.sv`, `tb/directed/dtcm_model.sv` (behavioural 128-bit port-B memory backed by the same contents written to `npu_ref_mem_write`)
-- Create: `sim/questa/run_mac_directed.do` (and a `.bat`/`.sh` wrapper); `sim/verilator/Makefile` target `lint` (`verilator --lint-only -Wall rtl/npu/*.sv rtl/top/npu_pkg.sv`)
+- Create: `sim/questa/run_mac_directed.do` (and a `.bat`/`.sh` wrapper); `sim/verilator/Makefile` target `lint` (`verilator --lint-only -Wall rtl/prim/*.sv rtl/npu/*.sv rtl/top/npu_pkg.sv`)
 - Create: `docs/mac_engine.md` (FSM diagram, exact latency per op for A-MAC-5)
 
 **Interfaces:**
@@ -405,15 +422,25 @@ Added 2026-10-21 (spec D14, D15). SC5 and Phase 4 name `golden_int8.py`, but no 
   - `t_addr_oob`, `t_addr_misaligned`
   - `load_addr_wraps_32bit`
   - `compute_k0_clr_keeps_acc`
-  - `t_illegal`
+  - `t_illegal` (D16: also with K = 0, K = 6, K = 1028 and a bad address; only `err_illegal` may be set)
   - `t_clr_vs_acc`
   - `t_wrap` (repeated accumulate as in Task 10)
   - `t_fifo_full`: 9 back-to-back pushes; `cmd_ready` drops at 8 entries and no command is lost
   - `t_read_while_busy`: `rd_ready` stays 0 until idle, then the data matches
   - `t_w1c`
+  - `t_csr_write_semantics` (D17): writing `0x100` to `npu_status` clears `err_k` only; writing 0 changes nothing; a write to `npu_busy_cyc` in a busy cycle wins over the increment (read it back the next cycle)
+  - `t_reset_state` (D18): with error bits set, a non-zero accumulator and a non-zero `npu_busy_cyc`, assert `rst_n`; afterwards the FIFO is empty, `npu_status` error bits are 0, `npu_busy_cyc` is 0 and all 16 `READ_RESULT` values are 0 (buffer contents after reset are not tested, §7.2)
 - [ ] **Step 2:** Run `sim/questa/run_mac_directed` → FAIL (engine missing).
 - [ ] **Step 3:** Implement per §7.2–§7.3: FSM `IDLE/CHECK/LOAD/MAC`; free-clock and `clk_mac` domains; `en = !rst_n_sync || (fsm != IDLE) || !fifo_empty`.
-- [ ] **Step 4:** Run the directed suite → all PASS. Run `make -C sim/verilator lint` → clean. Record measured latencies in `docs/mac_engine.md`. Each must be ≤ K/4 + 3.
+  Build order. For each stage the matching directed test already exists and fails before the stage (Step 1), and the stages before it stay green:
+  1. `cmd_fifo.sv`: depth `npu_pkg::FIFO_DEPTH`; push on `cmd_valid && cmd_ready`; `cmd_ready = !full` (A-MAC-1: no push while full, no pop while empty). Reaches `t_fifo_full`.
+  2. CHECK in the D16 order: ILLEGAL; K = 0; K > KMAX or K mod 4 ≠ 0 (`err_k`); for LOAD `addr[3:0] ≠ 0` (`err_align`), then the range check in 64-bit arithmetic (`err_addr`). Reaches `t_illegal`, `t_k0`, `t_k_too_big`, `t_k_mod4`, `t_addr_misaligned`, `t_addr_oob`, `load_addr_wraps_32bit`, `compute_k0_clr_keeps_acc`.
+  3. LOAD: K/4 port-B reads; `b_addr` is the quad index, `(addr - DTCM_BASE) >> 4` (12 bits, derived from §6.2 and §7.1); `b_rdata` is valid the cycle after `b_req`; write WBUF or IBUF (256 × 128 bit). Reaches the load half of `t_single_k4`.
+  4. `pe_array.sv` (16 dot4 PEs; with clr the first step loads the dot product instead of adding), the MAC state and the 4×4 accumulators. Reaches `t_single_k4`, `t_k_kmax`, `t_clr_vs_acc`, `t_wrap`.
+  5. CSR block (§6.4, D17): `npu_status` bits and W1C on the written value, `npu_busy_cyc`; `rd_ready = fifo_empty && fsm == IDLE`; READ_RESULT reads the accumulators combinationally. Reaches `t_w1c`, `t_read_while_busy`, `t_csr_write_semantics`.
+  6. Reset (D18): `rst_n` active low; asserting it clears FIFO, FSM, error bits, `npu_busy_cyc` and accumulators, and WBUF/IBUF are not reset. Reaches `t_reset_state`.
+  7. `npu_clk_gate` instance, `GATING_EN` passed down from `mac_engine`; in D0 its enable is tied to 1, so the whole suite is unchanged.
+- [ ] **Step 4:** Run the directed suite → all PASS. Run `make -C sim/verilator lint` → clean (Verilator is not installed on Bảo's machine, Task 0 S4: run it under WSL/Linux, or record the lint as not run). Record measured latencies in `docs/mac_engine.md`. Each must be ≤ K/4 + 3.
 - [ ] **Step 5: Commit** `feat(npu): mac_engine D0 with directed DPI testbench`.
 
 ---
