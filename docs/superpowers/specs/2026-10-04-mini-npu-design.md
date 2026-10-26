@@ -3,7 +3,7 @@
 - **Project:** Senior Project 2 (Đồ án 2), HCMUTE, class 23161FIE, advisor Phạm Văn Khoa
 - **Team:** Nguyễn Hoàng Công Tấn (23161064) — Track A, scalar core; Nguyễn Thế Bảo (23144002) — Track B, Matrix/MAC engine (assignment 2026-10-15)
 - **Repository:** https://github.com/baonyen1/Mini-NPU-Project
-- **Date:** 2026-10-04 (rev. 2026-10-14: QuestaSim, requant formula, model size confirmed; rev. 2026-10-15: engine is N×M×K = 4×4×4 with dot4 PEs and a 128-bit DTCM port B; owners; D11–D13 for Phases 2–4) · **Status:** approved; §6/§7.1 freeze pending
+- **Date:** 2026-10-04 (rev. 2026-10-14: QuestaSim, requant formula, model size confirmed; rev. 2026-10-15: engine is N×M×K = 4×4×4 with dot4 PEs and a 128-bit DTCM port B; owners; D11–D13 for Phases 2–4) · **Status:** approved; §6/§7.1 freeze proposed 2026-10-24 after a cross-check against `npu_pkg.sv`, `npu_ref`, `npu_stub.sv`, the core push/CSR path, `rv_iss` and `dtcm_dp` (D17–D19 added). Sign-off: Tấn ☐ · Bảo ☑ (2026-10-26). When both are ticked, replace this with "frozen <date> by Tấn, Bảo"
 - **Source documents:** `Proposal_Senior_Project_2_MiniNPU_VI.docx`; CoralNPU repository `google-coral/coralnpu` at commit `382b5c1` (2026-10-02)
 
 This spec turns the proposal into a buildable design. It fixes interfaces and semantics so the two tracks can work in parallel. It says *what* each block must do and *how it will be proven*. It does not contain RTL, UVM code or firmware. The students write those.
@@ -75,6 +75,9 @@ All of it is verified with a self-built **SystemVerilog UVM** environment. It mu
 | D14 | The retrained model export lives in `model/py/export/` and is committed: `fc{1,2,3}_weight.mem`, `fc{1,2,3}_bias.mem`, `requant.json`, `testvec_input.mem`, `testvec_expected.npz`, `manifest.json` (per-file SHA-256). The notebook writes it there. Track B decision 2026-10-21 (Bảo). | One frozen model for `pack_weights.py`, the golden files and the export-hash check (Phase 4 Tasks 25 and 27); matches the `model/py/` tree. |
 | D15 | The integer golden for the MLP is `model/py/golden_int8.py` (pure numpy: `quantize_input`, `requant`, `find_ms`, `compute_bound`, `IntModel`, `load_export`). It has its own unit tests and is cross-checked against `npu_ref`; the notebook imports it instead of keeping a copy. Created by Phase 1 Task 2b. Track B decision 2026-10-21 (Bảo). | SC5 names `golden_int8.py` but no task created it. A notebook cannot be imported without marimo and torch, and §10.2 allows an oracle only after its own unit tests pass. |
 | D16 | A command with op `ILLEGAL` is decided from `op` alone: the engine sets `err_illegal` and nothing else, even when K = 0, K > KMAX, K is not a multiple of 4 or the address is bad. The check order in `CHECK` is: ILLEGAL, K = 0, K range and multiple of 4, then for LOAD alignment, then address range. Track B decision 2026-10-23 (Bảo, option A); Tấn confirms by signing the §6 freeze. | The core pushes ILLEGAL with whatever `rs1`/`rs2` hold, so K and the address of an ILLEGAL command are arbitrary. If K = 0 won, a reserved `funct3` with `rs2 = 0` would be swallowed silently and the software error would stay hidden. Tests: `npu_ref` `test_illegal_op`, `test_illegal_wins_over_other_checks`; the Task 11 test `t_illegal` must cover K = 0, K = 6, K = 1028 and a bad address. |
+| D17 | CSR writes to 0x7C0/0x7C1 carry the **new value the core computed** (`csrrw`: rs1; `csrrs`: old \| rs1; `csrrc`: old & ~rs1; the `i` forms with uimm), and `csr_we` is 1 only when the instruction writes (`csrrw`/`csrrwi` always; `csrrs`/`csrrc`/`csrrsi`/`csrrci` only with a non-zero rs1/uimm). W1C on `npu_status` applies to that value. Firmware clears error bits with `csrw`/`csrrwi`. A `npu_busy_cyc` write in a busy cycle wins over the increment. | Matches the core (`CSR_Unit.v`), `npu_stub.sv`, `rv_iss.c` and RefISS as built; standard Zicsr read-modify-write. Consequence: `csrrs npu_status, t0` with t0 ≠ 0 clears every set error bit, and `csrrc` clears every set error bit outside its mask. |
+| D18 | Engine reset: `rst_n` is active low, **asserted asynchronously and released synchronously** to `clk` (the synchronizer sits in `npu_top`, which drives it from the core's active-high `reset`). Reset empties the FIFO, puts the FSM in IDLE, and clears the error bits, `npu_busy_cyc` and all 16 accumulators to 0. WBUF and IBUF are not reset (§7.2). | Project RTL rule (async assert, sync deassert; team decision 2026-10-24). §8's `!rst_n_sync` term keeps `clk_mac` running while reset is released; `npu_ref_reset` and the Task 10 tests already assume acc = 0 after reset. |
+| D19 | Engine RTL conventions: the ports keep the §7.1 names (the core and `npu_stub` already use them); internal signals follow the lowRISC style (`_q`/`_d`, CamelCase parameters). The only clock-gating cell is `rtl/prim/npu_clk_gate.sv` (latch + AND in simulation, `BUFGCE` behind `` `ifdef FPGA_XILINX `` later); `mac_engine #(GATING_EN)` passes `GATING_EN` to it, and with 0 it ties its enable to 1. | Team decision 2026-10-24. Renaming the ports would touch Task 9 and the stub just before the freeze; one gating primitive keeps the sim/FPGA choice in one file. |
 
 ### 3.2 Open (the team decides; the default is used if no decision is recorded by the end of week 2)
 
@@ -100,7 +103,7 @@ All of it is verified with a self-built **SystemVerilog UVM** environment. It mu
                  │                │             CSRs, port-B ctrl    │      │
                  │                │  clk_mac  : WBUF, IBUF 256×128,  │      │
                  │                │             PE 4×4 dot4, acc 4×4 │      │
-                 │                │  icg_cell(en) → clk_mac          │      │
+                 │                │  npu_clk_gate(en) → clk_mac      │      │
                  │                └───────┬──────────────────────────┘      │
                  │   LSU (port A, 32b R/W) │ port B (128b, read-only)       │
                  │          ▼             ▼                                 │
@@ -221,11 +224,13 @@ The CSRs are implemented in the engine and accessed by the core's CSR unit over 
 | 11 | `err_align` | W1C, sticky | |
 | others | — | RO 0 | |
 
-`npu_busy_cyc` (0x7C1): a 32-bit counter of cycles with `fsm != IDLE`. It runs on the free clock. A CSR write sets its value.
+`npu_busy_cyc` (0x7C1): a 32-bit counter of cycles with `fsm != IDLE`. It runs on the free clock. A CSR write sets its value; a write in a busy cycle wins over the increment (D17).
+
+CSR writes use the value the core computed for the CSR instruction (D17). Clear error bits with `csrw npu_status, <bits>` or `csrrwi`. `csrrs`/`csrrc` with a non-zero mask also write and, through W1C, clear more than their mask suggests. `csrr` does not write.
 
 ## 7. MAC engine microarchitecture (Track B)
 
-### 7.1 Interfaces (frozen at the end of week 2)
+### 7.1 Interfaces (freeze state: see the status line in the header)
 
 ```
 // command push (core MEM stage → engine), free clock domain
@@ -238,11 +243,12 @@ output rd_ready;                              // fifo_empty && fsm==IDLE
 output [31:0] rd_data;                        // valid when rd_req && rd_ready
 // CSR port
 input  csr_we; input [11:0] csr_addr; input [31:0] csr_wdata; output [31:0] csr_rdata;
+                                              // csr_wdata = new value computed by the core; csr_we only when the instruction writes (D17)
 // DTCM port B (read-only, 1-cycle latency)
 output b_req; output [11:0] b_addr;           // quad index within DTCM (4096 quads)
 input  [127:0] b_rdata;                       // 4 words (bank 0 = bits [31:0]), valid the cycle after b_req
 // clocks
-input clk, rst_n;                             // free clock
+input clk, rst_n;                             // free clock; rst_n active low, async assert / sync deassert (D18)
 ```
 
 ### 7.2 Behaviour
@@ -265,7 +271,7 @@ READ_RESULT reads the accumulators combinationally. They hold their value while 
 
 ## 8. Clock gating (D0/D1)
 
-- `icg_cell`: a latch transparent while `clk` is low, followed by an AND gate.
+- `npu_clk_gate` (`rtl/prim/npu_clk_gate.sv`, the only clock-gating cell in the design, D19): a latch transparent while `clk` is low, followed by an AND gate.
   ```
   always_latch if (!clk) en_l = en | test_en;
   assign gclk = clk & en_l;
@@ -274,7 +280,7 @@ READ_RESULT reads the accumulators combinationally. They hold their value while 
 - **Enable:** `en = !rst_n_sync || (fsm != IDLE) || !fifo_empty`.
   - The `!rst_n_sync` term keeps the clock running during reset, so synchronous resets in the gated domain still take effect.
   - The other terms come straight from registers, so `en` is glitch-free at the latch. A push at cycle *t* makes `fifo_empty` low at *t+1*. The latch opens during the low phase of *t+1*, and the first gated edge arrives at *t+2*, exactly when the FSM first needs the datapath. **Gating therefore adds no cycles, so cycle-identical D0/D1 is achievable (SC3).**
-- **D0:** `GATING_EN = 0`, so `en` is tied to 1 inside `icg_cell` and the instance stays. D0 and D1 have the same hierarchy and the same netlist apart from that tie.
+- **D0:** `GATING_EN = 0`, so `en` is tied to 1 inside `npu_clk_gate` (D19) and the instance stays. D0 and D1 have the same hierarchy and the same netlist apart from that tie.
 - **Safety invariant (assertion A-GATE-1):** `(fsm != IDLE || !fifo_empty) |-> en`.
 
 ## 9. Firmware and MNIST pipeline
@@ -437,7 +443,7 @@ Every soc test and every MNIST run is executed in both configurations. Any diffe
 
 ```
 mini-npu/
-  rtl/{core,npu,mem,top}/   rtl/npu/icg_cell.sv   rtl/top/npu_pkg.sv
+  rtl/{core,npu,mem,top,prim}/   rtl/prim/npu_clk_gate.sv   rtl/top/npu_pkg.sv
   tb/uvm/{common,mac_env,core_env,soc_env,tb}/   tb/sva/
   model/c/{npu_ref.c,rv_iss.c,tests/}   model/py/{golden_int8.py,pack_weights.py,gen_matmul.py}
   sw/{crt0.S,link.ld,npu.h,tests/,mnist/,synthetic/}
@@ -472,7 +478,7 @@ Each item is answered "works / does not work, with evidence (log)". The proposal
 | 3–4 | M, Zicsr, Zifencei, Zbb, custom decode/push; `rv_iss` + unit tests | `mac_engine` RTL (D0); `dtcm_dp`; `mac_env` skeleton | |
 | 5–6 | `core_env` + directed tests | `mac_env` directed tests | `npu_top` integration, first soc test |
 | 7–9 | core random + coverage | mac random + coverage | soc tests, coverage closure (SC2) |
-| 10–11 | — | `icg_cell`, D1 | equivalence harness, D1 regression (SC3) |
+| 10–11 | — | `npu_clk_gate`, D1 | equivalence harness, D1 regression (SC3) |
 | 12 | synthetic firmware | `toggle_count.py` | E2 data |
 | 13–14 | MNIST firmware | `pack_weights.py`, golden files | MNIST 1,000 images bit-exact on D0/D1 (SC5); report skeleton |
 | 15 | | E4 MNIST toggles (100 images) | full 10,000-image run (D0); `run.py all` on a clean clone (SC6) |

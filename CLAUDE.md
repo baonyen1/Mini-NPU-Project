@@ -116,7 +116,7 @@ tools/finish_task.sh "feat(core): M extension"               # Linux/macOS; SKIP
   - no `#` delays
   - `initial` and `$readmemh` only for backdoor load in `rtl/mem`
   - verification-only ports under `` `ifdef RVVI_TRACE ``
-- The only latch in the design is `icg_cell` (`always_latch`). Any other inferred latch is a bug.
+- The only latch in the design is the one inside `rtl/prim/npu_clk_gate.sv` (`always_latch`, spec D19). Any other inferred latch is a bug.
 - There are no other gated or derived clocks. `GATING_EN` is the only difference between D0 and D1.
 - New SV must be clean under `verilator --lint-only -Wall`.
 - Existing core files (`rtl/core/**/*.v`) keep their style:

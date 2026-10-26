@@ -152,7 +152,7 @@ Mục lục: [1. Kiến trúc tổng thể](#1-kiến-trúc-tổng-thể) · [2.
 | **Dynamic power** | Công suất tiêu thụ khi tín hiệu đổi trạng thái; tỉ lệ với C·V²·f·hoạt động. | Lý do đo switching activity (P&H 1.7). |
 | **Switching activity / Toggle** | Số lần tín hiệu đổi 0↔1. | Thước đo công suất ước tính. Không phải "công suất đo được". |
 | **Clock gating** | Tắt clock cho một khối khi nó rảnh để các flip-flop không toggle. | Gate riêng MAC engine. |
-| **ICG** (Integrated Clock Gate) | Cell gating chuẩn: latch + cổng AND. | `rtl/npu/icg_cell.sv`. |
+| **ICG** (Integrated Clock Gate) | Cell gating chuẩn: latch + cổng AND. | `rtl/prim/npu_clk_gate.sv` (spec D19). |
 | **Latch** | Phần tử nhớ trong suốt theo mức clock (khác flip-flop theo cạnh). | Latch giữ `en` để không tạo xung clock lỗi (glitch). |
 | **Glitch** | Xung nhiễu ngắn không mong muốn. | Lý do phải dùng ICG thay vì AND trực tiếp. |
 | **Gated clock / free clock** | Clock bị tắt được / clock luôn chạy. | Buffer + PE + acc ở gated; FIFO + FSM + CSR ở free. |

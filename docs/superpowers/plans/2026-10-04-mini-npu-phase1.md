@@ -23,7 +23,7 @@
 |---|---|---|
 | 0 · Tool gate | Tấn: S1 UVM, S3 coverage, S5 toolchain, S6 xsim · Bảo: S2 DPI-C, S4 Verilator ICG, S7 VCD by scope | closed 2026-10-18: S1–S3, S5–S7 pass (`docs/smoke/results.md`); S4 Verilator part skipped by team decision |
 | 1 · Core cleanup | Track A | done (`69cd798`) |
-| 2 · Week-2 freeze | both (Tấn: `docs/core_isa.md`, W2-1; Bảo: `npu_pkg.sv`, notebook retrain; both sign §6/§7.1) | open. `rtl/top/npu_pkg.sv` written 2026-10-23 (Verilator lint clean; Questa `vlog` still to run); retrained export committed 2026-10-23 (D14, spec O1/O2 closed); only the §6/§7.1 sign-off remains |
+| 2 · Week-2 freeze | both (Tấn: `docs/core_isa.md`, W2-1; Bảo: `npu_pkg.sv`, notebook retrain; both sign §6/§7.1) | open. `rtl/top/npu_pkg.sv` written 2026-10-23 (Verilator lint clean; QuestaSim 10.7c `vlog -sv` clean 2026-10-24, 0 errors 0 warnings); retrained export committed 2026-10-23 (D14, spec O1/O2 closed); only the §6/§7.1 sign-off remains (freeze proposed 2026-10-24 in the spec header, D17/D18) |
 | 2b · `golden_int8.py` | Bảo | done 2026-10-23 (`model/py/golden_int8.py`, 13 tests incl. the `npu_ref` tile cross-check; notebook imports it, export bytes unchanged) |
 | 3 · Complete RV32I | Track A (Tấn takes over, handover step below) | done (`c413abd`) |
 | 4 · Extend reference ISS | Claude **[support]** | done (`0d7b38c`, 2026-10-20) |
@@ -388,7 +388,7 @@ Added 2026-10-21 (spec D14, D15). SC5 and Phase 4 name `golden_int8.py`, but no 
 ### Task 11: `mac_engine` RTL (D0) with a directed DPI testbench — Track B, weeks 3–4
 
 **Files:**
-- Create: `rtl/npu/mac_engine.sv`, `rtl/npu/cmd_fifo.sv`, `rtl/npu/pe_array.sv` (16 dot4 PEs), `rtl/npu/icg_cell.sv` (with `GATING_EN=0` it ties `en` to 1, §8)
+- Create: `rtl/npu/mac_engine.sv`, `rtl/npu/cmd_fifo.sv`, `rtl/npu/pe_array.sv` (16 dot4 PEs), `rtl/prim/npu_clk_gate.sv` (with `GATING_EN=0` it ties `en` to 1, §8, D19)
 - Create: `tb/directed/mac_engine_tb.sv`, `tb/directed/dtcm_model.sv` (behavioural 128-bit port-B memory backed by the same contents written to `npu_ref_mem_write`)
 - Create: `sim/questa/run_mac_directed.do` (and a `.bat`/`.sh` wrapper); `sim/verilator/Makefile` target `lint` (`verilator --lint-only -Wall rtl/npu/*.sv rtl/top/npu_pkg.sv`)
 - Create: `docs/mac_engine.md` (FSM diagram, exact latency per op for A-MAC-5)
