@@ -6,7 +6,7 @@
 
 **Goal:** By the end of week 12, D1 (MAC-engine clock gating) is cycle-identical to D0 on every soc test (SC3), and the synthetic idle-ratio sweep E2 has produced M1/M2 switching-activity estimates for D0 and D1 (SC4, synthetic part).
 
-**Architecture:** One `icg_cell` (latch + AND, the pattern of CoralNPU `hdl/verilog/ClockGate.sv`, written by the team) gates `clk_mac`, which clocks WBUF, IBUF, the PE registers and the accumulators (§7.3, §8). D0 and D1 differ only in `GATING_EN`. An equivalence harness proves D1 = D0 before any power number is produced; then a VCD of `u_mac_engine`, taken only inside the firmware's measurement window, is reduced to toggle counts.
+**Architecture:** One `npu_clk_gate` (latch + AND, the pattern of CoralNPU `hdl/verilog/ClockGate.sv`, written by the team) gates `clk_mac`, which clocks WBUF, IBUF, the PE registers and the accumulators (§7.3, §8). D0 and D1 differ only in `GATING_EN`. An equivalence harness proves D1 = D0 before any power number is produced; then a VCD of `u_mac_engine`, taken only inside the firmware's measurement window, is reduced to toggle counts.
 
 **Tech Stack:** SystemVerilog on QuestaSim (one simulator for both configurations, D1a), Python 3 (VCD parsing, CSV, matplotlib), RISC-V GCC.
 
@@ -16,7 +16,7 @@
 
 | Task | Owner | Weeks |
 |---|---|---|
-| 20 · `icg_cell` + D1 + gating SVA/coverage | Bảo | 10 |
+| 20 · `npu_clk_gate` + D1 + gating SVA/coverage | Bảo | 10 |
 | 21 · D0/D1 equivalence harness | Tấn (script), both run | 10–11 |
 | 22 · Synthetic idle-ratio firmware | Tấn | 11 |
 | 23 · Engine VCD window + `toggle_count.py` | Bảo | 11–12 |
@@ -41,29 +41,29 @@
 
 ---
 
-### Task 20: `icg_cell`, D1 configuration, gating assertions and coverage — Track B, week 10
+### Task 20: `npu_clk_gate`, D1 configuration, gating assertions and coverage — Track B, week 10
 
 **Files:**
-- Modify: `rtl/npu/icg_cell.sv` (latch transparent while `clk` low, then AND; `test_en` input; `/* verilator clock_enable */` on the latch output; `GATING_EN=0` ties `en` to 1 inside the cell, so D0 keeps the instance)
+- Modify: `rtl/prim/npu_clk_gate.sv` (latch transparent while `clk` low, then AND; `test_en` input; `/* verilator clock_enable */` on the latch output; `GATING_EN=0` ties `en` to 1 inside the cell, so D0 keeps the instance)
 - Modify: `rtl/npu/mac_engine.sv` (`en` per §8; WBUF, IBUF, PE registers and accumulators on `clk_mac`; FIFO, FSM, CSRs, `npu_busy_cyc`, port-B counter on `clk`)
 - Create: `tb/sva/gate_sva.sv` (A-GATE-1, A-GATE-2, `bind mac_engine`)
 - Modify: `tb/uvm/mac_env/mac_coverage.sv` (`cg_gate`: en rise, en fall, en low exactly 1 cycle, en low ≥ 100 cycles; sampled only when `GATING_EN=1`)
-- Create: `tb/directed/icg_cell_tb.sv`
+- Create: `tb/directed/npu_clk_gate_tb.sv`
 - Modify: `docs/mac_engine.md` (clock-domain table, en timing diagram for a push after idle)
 
 **Interfaces:**
 - Consumes: `mac_env` (Phase 2 Task 16), `run.py --config d0|d1` (`+define+GATING_EN=0|1`).
-- Produces: `module icg_cell #(parameter bit GATING_EN = 1) (input logic clk, en, test_en, output logic gclk);` and the net `u_mac_engine.clk_mac` (M1 is counted on this exact name).
+- Produces: `module npu_clk_gate #(parameter bit GATING_EN = 1) (input logic clk, en, test_en, output logic gclk);` and the net `u_mac_engine.clk_mac` (M1 is counted on this exact name).
 
 - [ ] **Step 1: Write the failing tests:**
-  - `icg_cell_tb`: `en` low for cycles 10–19 → 0 rising edges of `gclk` in cycles 11–19, one per cycle elsewhere; with `GATING_EN=0` one edge every cycle; an `en` glitch while `clk` is high does not reach `gclk`
+  - `npu_clk_gate_tb`: `en` low for cycles 10–19 → 0 rising edges of `gclk` in cycles 11–19, one per cycle elsewhere; with `GATING_EN=0` one edge every cycle; an `en` glitch while `clk` is high does not reach `gclk`
   - `mac_gate_push_on_fall` (Review Focus 1): idle the engine, then push on the first cycle `en` is low; the command's port-B request cycle (relative to the push) equals the D0 value
   - `mac_gate_read_after_long_idle` (Review Focus 2): COMPUTE, 500 idle cycles (gated), READ all 16 → equal to `npu_ref`
   - `mac_gate_idle_mix`: `mac_rand_seq` with inter-command gaps forced to {0, 1, 2, 150} cycles so that all `cg_gate` bins are hit
 - [ ] **Step 2:** `run.py --target mac_gate --config d1` → FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** `run.py --target mac_regress --config d1 --seeds 200 --cov` → 0 mismatches, 0 SVA failures (A-MAC-*, A-GATE-*), `cg_gate` 100 %; the same command with `--config d0` still green. Then `run.py --target regress_d1` (Phase 2 Task 19 suite) → green (SC1 on D1).
-- [ ] **Step 5: Commit** `feat(npu): icg_cell and D1 gating with assertions and cg_gate`.
+- [ ] **Step 5: Commit** `feat(npu): npu_clk_gate and D1 gating with assertions and cg_gate`.
 
 ---
 

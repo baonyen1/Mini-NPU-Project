@@ -8,6 +8,7 @@ Design spec: `docs/superpowers/specs/2026-10-04-mini-npu-design.md`.
 rtl/core/        5-stage core (StageIF, StageDecode, StageExecute, StageMemory, StageWriteBack)   [Track A]
 rtl/npu/         MAC engine + clock gating                                                         [Track B]
 rtl/mem/         ITCM / dual-port DTCM
+rtl/prim/        npu_clk_gate (the only clock-gating cell)
 rtl/top/         npu_top, npu_pkg
 tb/uvm/          common, core_env [A], mac_env [B], soc_env [A+B]
 tb/sva/          assertions
