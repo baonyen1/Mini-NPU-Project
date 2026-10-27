@@ -19,6 +19,8 @@
 
 **Owners (team decision 2026-10-15):** Track A (scalar core, `core_env`) — **Nguyễn Hoàng Công Tấn**. Track B (Matrix/MAC engine, `mac_env`) — **Nguyễn Thế Bảo**. Joint: Tasks 0 and 2, later `soc_env`. Task headings below name the track; this table is the only place that maps tracks to people.
 
+**Calendar (spec D22):** week 1 = Mon 2026-10-12 to Sun 2026-10-18, week *N* starts 7(*N*−1) days later. Phase 1 (weeks 1–4) ends Sun 2026-11-08; Phase 2 starts Mon 2026-11-09.
+
 | Task | Owner | Status 2026-10-15 |
 |---|---|---|
 | 0 · Tool gate | Tấn: S1 UVM, S3 coverage, S5 toolchain, S6 xsim · Bảo: S2 DPI-C, S4 Verilator ICG, S7 VCD by scope | closed 2026-10-18: S1–S3, S5–S7 pass (`docs/smoke/results.md`); S4 Verilator part skipped on 2026-10-18 by team decision, then run on 2026-10-27 under WSL (testbench lint warnings, see `docs/smoke/results.md`) |
@@ -29,9 +31,9 @@
 | 4 · Extend reference ISS | Claude **[support]** | done (`0d7b38c`, 2026-10-20) |
 | 5, 6, 7, 9, 12 · M, Zicsr, Zifencei/Zbb, custom-0 push, `rv_iss.c` | Tấn | implemented by Claude at Tấn's request, 2026-10-20: 5 `040e81c`, 6 `ef773fc`, 7 `3d4fede`, 9 `95e5091`, 12 `fbc3fd5`. **Tấn must still review and be able to defend them** (report: `docs/reports/2026-10-20-track-a-phase1.md`). |
 | 8 · ITCM/DTCM/MMIO/RVVI | Tấn: core LSU, ITCM, SIM MMIO, RVVI · Bảo: `dtcm_dp` (port B is the engine's interface) | Tấn's part done (`6280c97`, 2026-10-20) on a port-A stand-in DTCM; `dtcm_dp` written 2026-10-23 (`rtl/mem/dtcm_dp.sv`, test `tb/directed/dtcm_dp_tb.sv` incl. `dtcm_last_word` and `dtcm_port_b_quad`, `make -C sim/verilator test_dtcm_dp`); swapping it into `core_tb_top` in place of the stand-in is Tấn's call |
-| 10, 11 · `npu_ref.c`, `mac_engine` D0 | Bảo | 10 done 2026-10-17; 11 open, starts on the proposed freeze (D20), build order in the Task 11 section |
+| 10, 11 · `npu_ref.c`, `mac_engine` D0 | Bảo | 10 done 2026-10-17; 11 open, starts on the proposed freeze (D20), build order in the Task 11 section; due end of week 4, Sun 2026-11-08 (D22) |
 
-**Handover (Tấn, before Task 5):** the Task 3 RTL was written by Claude and the core history is Bảo's. Tấn reads `docs/core_isa.md` and `docs/core_stall.md`, runs `python tools/rv32i_check/run_all.py` (expected: ISA 44/44, hazard 25/25, random 300/300), then explains each Task 3 change to Bảo. Done when Tấn can trace one `jalr` and one load-use stall through the pipeline without notes.
+**Handover (Tấn, before Task 5):** the Task 3 RTL was written by Claude and the core history is Bảo's. Tấn reads `docs/core_isa.md` and `docs/core_stall.md`, runs `python tools/rv32i_check/run_all.py` (expected: ISA 45/45 (44 plus `jalr_funct3_is_nop`, added in Task 12), hazard 25/25, random 300/300; the whole `run_all.py` is 8 suites, 1291 results on 2026-10-27), then explains each Task 3 change to Bảo. Done when Tấn can trace one `jalr` and one load-use stall through the pipeline without notes.
 
 **Next actions (set 2026-10-26 by Bảo).** Each student works from this list; "done when" names the test or file that proves the item. Nothing here waits for a sign-off (spec D20).
 
@@ -39,7 +41,7 @@
 
 1. **Handover review** (paragraph above), now covering Tasks 5, 6, 7, 9 and 12 as well. Read `docs/reports/2026-10-20-track-a-phase1.md`, then be ready to explain the Review Focus tests: `div_in_branch_shadow`, `mul_x0` (`tests_m.py`), `csrrw_x0_still_writes_csr`, `csr_raw_back_to_back` (`tests_csr.py`), `push_in_branch_shadow`, `read_result_x0_still_drains` (`tests_custom.py`). Done when: for each one he can say which stall or flush source wins, and why the younger instruction does not write back or push, without notes.
 2. **Record W2-1** (illegal and unsupported instructions, out-of-range access). The options are in `docs/core_isa.md` §4; Tấn drafts it (Task 2 row) and both sign. Done when: the chosen option and its date are written in `docs/core_isa.md` §4, in spec §4.1 and in the spec decision log, and `rvvi_trap`, `rv_iss` and `RefISS` follow it. Until then `fence`, `ecall`, `ebreak` and unknown encodings stay NOPs.
-3. **Review §6/§7.1 against the core** and tick his box in the spec header, or write the change he wants as a dated spec entry. He checks three things: D16 (the core pushes op ILLEGAL with whatever `rs1`/`rs2` hold; test `illegal_funct3`), D17 (the CSR write value and the `csr_we` rule match `CSR_Unit.v`; tests `csr_ops_all6`, `csrrw_x0_still_writes_csr`), D18 (the reset synchronizer lives in `npu_top`, Phase 2 Task 14). This is not a gate for Task 11 (D20).
+3. **Review §6/§7.1 against the core** and tick his box in the spec header, or write the change he wants as a dated spec entry. He checks four things: D16 (the core pushes op ILLEGAL with whatever `rs1`/`rs2` hold; test `illegal_funct3`), D17 (the CSR write value and the `csr_we` rule match `CSR_Unit.v`; tests `csr_ops_all6`, `csrrw_x0_still_writes_csr`), D18 (the reset synchronizer lives in `npu_top`, Phase 2 Task 14) and D21 (`csr_rdata` is combinational in `csr_addr`, which `CSR_Unit.v` already assumes; it settles ruling 2 in `docs/core_isa.md` §7). This is not a gate for Task 11 (D20).
 4. **Swap `dtcm_dp` into `core_tb_top.sv`** in place of the port-A stand-in `core_tb_dtcm.sv` (Task 8 row; his call whether to do it now or in Task 14). It changes the instance and `peek` in `core_tb_top.sv`, `mem[k]` to `peek(k)` in `tb_dump.v`, and the file list in `run.py` ([support]: Claude can do those two on request). Done when: `python tools/rv32i_check/run_all.py` ends with `RESULT: PASS`.
 5. **Start Phase 2 Task 13** (firmware base). It runs on `core_tb_top` with the engine stub and does not use the engine RTL, so it can start once items 1–3 are done.
 
@@ -213,7 +215,7 @@ Added 2026-10-21 (spec D14, D15). SC5 and Phase 4 name `golden_int8.py`, but no 
   - `srai_negative`: `srai` of `0x80000F0F` by 4 → `0xF80000F0`
   - `bltu_bgeu_sign`: `bltu 0x80000000, 1` not taken; `bgeu` taken
 - [ ] **Step 3:** Implement the decode, the ALU ops and the unsigned branch compares.
-- [ ] **Step 4:** Run `run_all.py`. Expected: ISA **44/44** (40 + 4 corner tests), hazard 25/25, random 300/300 with the extended generator.
+- [ ] **Step 4:** Run `run_all.py`. Expected: ISA **44/44** (40 + 4 corner tests; 45 since Task 12 added `jalr_funct3_is_nop`), hazard 25/25, random 300/300 with the extended generator.
 - [ ] **Step 5: Commit** `feat(core): complete RV32I base`.
 
 ---
@@ -221,7 +223,7 @@ Added 2026-10-21 (spec D14, D15). SC5 and Phase 4 name `golden_int8.py`, but no 
 ### Task 4 [support]: Extend rv32i_check to M, Zicsr, Zifencei, Zbb and the new memory map — week 3
 
 **Files:**
-- Modify: `tools/rv32i_check/run.py`. Rename the class `ISS` → `RefISS`. Add M, Zicsr (`minstret` modelled exactly; `mcycle` reads masked), Zifencei (no-op), Zbb, and custom-0 in stub mode (READ_RESULT → `idx`; LDW/LDI/MAC → record `(op, addr, k, clr)` into `RefISS.cmd_log`). Add a memory-map switch, `MEMMAP = "sp1"` (current 1 KB/1 KB) or `"spec"` (ITCM 16 KB, DTCM 64 KB at `0x0001_0000`).
+- Modify: `tools/rv32i_check/run.py`. Rename the class `ISS` → `RefISS`. Add M, Zicsr (`minstret` modelled exactly; `mcycle` reads masked), Zifencei (no-op), Zbb, and custom-0 in stub mode (READ_RESULT → `idx`; LDW/LDI/MAC → record `(op, addr, k, clr)` into `RefISS.cmd_log`). Add a memory-map switch, `MEMMAP = "sp1"` (current 1 KB/1 KB) or `"spec"` (ITCM 16 KB, DTCM 64 KB at `0x0001_0000`). *(Superseded: the switch was removed with the SP1 map in 6280c97; the harness runs only the spec map.)*
 - Modify: `tools/rv32i_check/tb_dump.v`. Make the hierarchy paths `` `define``-selectable so they can follow Task 8.
 - Create: `tools/rv32i_check/tests_m.py`, `tests_csr.py`, `tests_zbb.py`, `tests_custom.py` (the test bodies are listed in Tasks 5–9).
 
@@ -267,10 +269,10 @@ Added 2026-10-21 (spec D14, D15). SC5 and Phase 4 name `golden_int8.py`, but no 
 - Test: `tools/rv32i_check/tests_csr.py`
 
 **Interfaces:**
-- Produces: `CSR_Unit(clk, reset, csr_op[2:0], csr_addr[11:0], wdata[31:0], rdata[31:0], retire, npu_csr_we, npu_csr_addr[11:0], npu_csr_wdata[31:0], npu_csr_rdata[31:0])`. Addresses 0x7C0 and 0x7C1 are forwarded to the `npu_csr_*` port. Task 9 brings that port out of `RISC_V_Top` under the §7.1 names `csr_we`, `csr_addr`, `csr_wdata`, `csr_rdata`.
+- Produces: `CSR_Unit(clk, reset, csr_op[2:0], csr_addr[11:0], wdata[31:0], rdata[31:0], retire, npu_csr_we, npu_csr_addr[11:0], npu_csr_wdata[31:0], npu_csr_rdata[31:0])`. Writes to 0x7C0 and 0x7C1 go to the `npu_csr_*` port: `npu_csr_we` is gated by the address, while `npu_csr_addr` follows the EX immediate in every cycle (spec D21). Task 9 brings that port out of `RISC_V_Top` under the §7.1 names `csr_we`, `csr_addr`, `csr_wdata`, `csr_rdata`.
 
 - [ ] **Step 1: Write the failing tests:**
-  - `csr_ops_all6`: `csrrw csrrs csrrc csrrwi csrrsi csrrci` on a scratch CSR. Use 0x7C0 through the stub; the stub implements W1C on bits 8–10 per §6.4.
+  - `csr_ops_all6`: `csrrw csrrs csrrc csrrwi csrrsi csrrci` on a scratch CSR. Use 0x7C0 through the stub; the stub implements W1C on bits 8–11 per §6.4.
   - `minstret_delta`: `csrr a,minstret; <N=5 instrs>; csrr b,minstret` → `b-a == 6`
   - `mcycle_ge_minstret`: the `mcycle` delta ≥ the `minstret` delta, checked in-program with `sltu` into a register
   - `cycle_alias_reads`: `rdcycle`/`rdinstret` equal `mcycle`/`minstret` read in the same position (masked compare)
@@ -296,7 +298,7 @@ Added 2026-10-21 (spec D14, D15). SC5 and Phase 4 name `golden_int8.py`, but no 
   - `cpop_all_ones`: = 32
   - `orc_b`: `0x00010200` → `0x00FFFF00`
   - `rev8`: `0x11223344` → `0x44332211`
-  - `sext_b`: `0x80` → `0xFFFFFF80`; `sext_h`, `zext_h` on `0x8001_8001`
+  - `sext_b`: `0x80` → `0xFFFFFF80`; `sext_h`, `zext_h` on `0x8001_8001` (implemented as test `sext_zext`, plus the generated `unary_sext_b`)
   - `rol_ror_0_31`; `rori_31`
   - `max_min_sign`: `max/min` vs `maxu/minu` on `(0x80000000, 1)`
   - `andn_orn_xnor`
@@ -314,7 +316,7 @@ Added 2026-10-21 (spec D14, D15). SC5 and Phase 4 name `golden_int8.py`, but no 
 - Create: `rtl/mem/dtcm_dp.sv` (64 KB as 4 banks × 32 bit, bank = word address [1:0]; port A 32-bit R/W with byte enables, 1-cycle read; port B 128-bit read-only (one word from each bank), 1-cycle read; backdoor `+DTCM=<file>`)
 - Create: `rtl/top/core_tb_top.sv` (core + itcm + dtcm + SIM MMIO decode + engine stub from Task 9)
 - Modify: `rtl/core` LSU path (byte-lane formatting stays in the core; the old `Data_Memory.v`/`ProgramMemory.v` are removed); add the RVVI output ports under `` `ifdef RVVI_TRACE ``
-- Modify **[support]**: `tools/rv32i_check` → `MEMMAP="spec"`, hierarchy paths updated
+- Modify **[support]**: `tools/rv32i_check` → `MEMMAP="spec"`, hierarchy paths updated *(the switch was removed in 6280c97; the harness runs only the spec map)*
 
 **Interfaces:**
 - Produces, core ports:
@@ -326,12 +328,12 @@ Added 2026-10-21 (spec D14, D15). SC5 and Phase 4 name `golden_int8.py`, but no 
   - port B (exactly §7.1): `b_req`, `b_addr[11:0]` (quad index), `b_rdata[127:0]` (bank 0 in bits [31:0])
 
 - [ ] **Step 1: Failing tests:**
-  - every earlier suite re-run with `MEMMAP="spec"`
+  - every earlier suite re-run on the spec map (the `MEMMAP` switch was later removed, 6280c97)
   - `dtcm_last_word`: store and load at `0x0001_FFFC`
   - `dtcm_port_b_quad`: after port-A stores to `0x0001_0010..0x0001_001C`, a port-B read of quad 1 returns those 4 words in bank order
   - `sim_ctrl_pass`: a write of `0x1` to `0x0002_0000` ends the simulation with "PASS"
   - `sim_putc`: `"OK\n"` appears in the log
-  - `rvvi_order_monotonic`: the trace's `order` increments by 1 per retire, with no gaps after stalls or flushes (checked by a small Python script over a trace dump)
+  - `rvvi_order_monotonic`: the trace's `order` increments by 1 per retire, with no gaps after stalls or flushes (checked by a small Python script over a trace dump; implemented as `rvvi_order_monotonic_flushes`, `_divider`, `_engine_waits`, `_csr_in_stall` and `rvvi_order_selftest`)
 - [ ] **Step 2:** Run → FAIL. **Step 3:** Implement. **Step 4:** Run → PASS.
 - [ ] **Step 5: Commit** `feat(mem,core): ITCM/DTCM, SIM MMIO, RVVI trace`.
 
@@ -396,7 +398,7 @@ Added 2026-10-21 (spec D14, D15). SC5 and Phase 4 name `golden_int8.py`, but no 
   - `w1c`: write `0xF00` to 0x7C0 clears all four error bits; write `0x100` clears only `err_k`
   - `addr_misaligned`: `addr=0x0001_0004` (and `0x0001_0001`) with K=4 → `err_align`, command dropped
 - [ ] **Step 2:** Run `make -C model/c test` → FAIL (not implemented).
-- [ ] **Step 3:** Implement. Check order in `npu_ref_cmd`: K==0 → no-op; K>KMAX or K%4 → `err_k`; for loads `a[3:0]≠0` → `err_align`, then range in 64-bit arithmetic `(uint64_t)a + 4ull*k > DTCM_BASE + DTCM_BYTES` → `err_addr`. Record this order in the spec if the team changes it.
+- [ ] **Step 3:** Implement. Check order in `npu_ref_cmd` (since D16, 2026-10-23, ILLEGAL is checked before all of these): K==0 → no-op; K>KMAX or K%4 → `err_k`; for loads `a[3:0]≠0` → `err_align`, then range in 64-bit arithmetic `(uint64_t)a + 4ull*k > DTCM_BASE + DTCM_BYTES` → `err_addr`. Record this order in the spec if the team changes it.
 - [ ] **Step 4:** Run `make -C model/c test` → all asserts pass.
 - [ ] **Step 5: Commit** `feat(model): npu_ref golden model with unit tests`.
 
@@ -407,7 +409,7 @@ Added 2026-10-21 (spec D14, D15). SC5 and Phase 4 name `golden_int8.py`, but no 
 **Files:**
 - Create: `rtl/npu/mac_engine.sv`, `rtl/npu/cmd_fifo.sv`, `rtl/npu/pe_array.sv` (16 dot4 PEs), `rtl/prim/npu_clk_gate.sv` (with `GATING_EN=0` it ties `en` to 1, §8, D19)
 - Create: `tb/directed/mac_engine_tb.sv`, `tb/directed/dtcm_model.sv` (behavioural 128-bit port-B memory backed by the same contents written to `npu_ref_mem_write`)
-- Create: `sim/questa/run_mac_directed.do` (and a `.bat`/`.sh` wrapper); `sim/verilator/Makefile` target `lint` (`verilator --lint-only -Wall rtl/prim/*.sv rtl/npu/*.sv rtl/top/npu_pkg.sv`)
+- Create: `sim/questa/run_mac_directed.do` (and a `.bat`/`.sh` wrapper); extend the existing `sim/verilator/Makefile` target `lint` (today `npu_pkg` + `dtcm_dp`) with `verilator --lint-only -Wall --top-module mac_engine rtl/top/npu_pkg.sv rtl/prim/*.sv rtl/npu/*.sv` (the package must come first: listed after a file that imports it, Verilator 5.020 stops with PKGNODECL, checked 2026-10-28)
 - Create: `docs/mac_engine.md` (FSM diagram, exact latency per op for A-MAC-5)
 
 **Interfaces:**
@@ -428,7 +430,7 @@ Added 2026-10-21 (spec D14, D15). SC5 and Phase 4 name `golden_int8.py`, but no 
   - `t_fifo_full`: 9 back-to-back pushes; `cmd_ready` drops at 8 entries and no command is lost
   - `t_read_while_busy`: `rd_ready` stays 0 until idle, then the data matches
   - `t_w1c`
-  - `t_csr_write_semantics` (D17): writing `0x100` to `npu_status` clears `err_k` only; writing 0 changes nothing; a write to `npu_busy_cyc` in a busy cycle wins over the increment (read it back the next cycle)
+  - `t_csr_write_semantics` (D17): writing `0x100` to `npu_status` clears `err_k` only; writing 0 changes nothing; a write to `npu_busy_cyc` in a busy cycle wins over the increment (read it back the next cycle); (D21) in the cycle of each write `csr_rdata` still shows the old value, and the addresses 0x000, 0x7C2, 0x7C3, 0x3C0, 0xFC0 and 0xB00 read 0 and ignore writes while error bits are set and `npu_busy_cyc` ≠ 0 (so a partial address decode would show up as an alias)
   - `t_reset_state` (D18): with error bits set, a non-zero accumulator and a non-zero `npu_busy_cyc`, assert `rst_n`; afterwards the FIFO is empty, `npu_status` error bits are 0, `npu_busy_cyc` is 0 and all 16 `READ_RESULT` values are 0 (buffer contents after reset are not tested, §7.2)
 - [ ] **Step 2:** Run `sim/questa/run_mac_directed` → FAIL (engine missing).
 - [ ] **Step 3:** Implement per §7.2–§7.3: FSM `IDLE/CHECK/LOAD/MAC`; free-clock and `clk_mac` domains; `en = !rst_n_sync || (fsm != IDLE) || !fifo_empty`.
@@ -437,8 +439,8 @@ Added 2026-10-21 (spec D14, D15). SC5 and Phase 4 name `golden_int8.py`, but no 
   2. CHECK in the D16 order: ILLEGAL; K = 0; K > KMAX or K mod 4 ≠ 0 (`err_k`); for LOAD `addr[3:0] ≠ 0` (`err_align`), then the range check in 64-bit arithmetic (`err_addr`). Reaches `t_illegal`, `t_k0`, `t_k_too_big`, `t_k_mod4`, `t_addr_misaligned`, `t_addr_oob`, `load_addr_wraps_32bit`, `compute_k0_clr_keeps_acc`.
   3. LOAD: K/4 port-B reads; `b_addr` is the quad index, `(addr - DTCM_BASE) >> 4` (12 bits, derived from §6.2 and §7.1); `b_rdata` is valid the cycle after `b_req`; write WBUF or IBUF (256 × 128 bit). Reaches the load half of `t_single_k4`.
   4. `pe_array.sv` (16 dot4 PEs; with clr the first step loads the dot product instead of adding), the MAC state and the 4×4 accumulators. Reaches `t_single_k4`, `t_k_kmax`, `t_clr_vs_acc`, `t_wrap`.
-  5. CSR block (§6.4, D17): `npu_status` bits and W1C on the written value, `npu_busy_cyc`; `rd_ready = fifo_empty && fsm == IDLE`; READ_RESULT reads the accumulators combinationally. Reaches `t_w1c`, `t_read_while_busy`, `t_csr_write_semantics`.
-  6. Reset (D18): `rst_n` active low; asserting it clears FIFO, FSM, error bits, `npu_busy_cyc` and accumulators, and WBUF/IBUF are not reset. Reaches `t_reset_state`.
+  5. CSR block (§6.4, D17, D21): `npu_status` bits and W1C on the written value, `npu_busy_cyc`; `csr_rdata` combinational in `csr_addr` with no path from `csr_we`/`csr_wdata`; `rd_ready = fifo_empty && fsm == IDLE`; READ_RESULT reads the accumulators combinationally. Reaches `t_w1c`, `t_read_while_busy`, `t_csr_write_semantics`.
+  6. Reset (D18): `rst_n` active low; asserting it clears FIFO, FSM, error bits, `npu_busy_cyc` and accumulators, and WBUF/IBUF are not reset. Reaches `t_reset_state`. Decide first, D18 leaves it open: asynchronous-assert flops or a synchronous reset on the synchronized `rst_n`, and whether §8's `rst_n_sync` is the §7.1 `rst_n`.
   7. `npu_clk_gate` instance, `GATING_EN` passed down from `mac_engine`; in D0 its enable is tied to 1, so the whole suite is unchanged.
 - [ ] **Step 4:** Run the directed suite → all PASS. Run `make -C sim/verilator lint` → clean (Verilator 5.020 runs under WSL on Bảo's machine since 2026-10-27: run `make -C sim/verilator lint` there). Record measured latencies in `docs/mac_engine.md`. Each must be ≤ K/4 + 3.
 - [ ] **Step 5: Commit** `feat(npu): mac_engine D0 with directed DPI testbench`.
@@ -469,8 +471,8 @@ Added 2026-10-21 (spec D14, D15). SC5 and Phase 4 name `golden_int8.py`, but no 
 ## Phase 1 exit checklist
 
 - [ ] Task 0: `docs/smoke/results.md` complete; licence type recorded, O3 closed; proposal updated if S1–S3 passed
-- [ ] Tasks 1–9: `python tools/rv32i_check/run_all.py` (with `MEMMAP="spec"`) runs all suites green, including Review Focus tests 1–3
-- [x] Task 10: `make -C model/c test` green, including Review Focus 4–5 (22/22, 2026-10-17)
+- [ ] Tasks 1–9: `python tools/rv32i_check/run_all.py` runs all suites green, including Review Focus tests 1–3 (green on 2026-10-27: 1291/1291 in WSL; CI runs it on every push and every run checked from 00a9207 to 2b1ed05 was green; the harness runs only the spec map since 6280c97; box left for the team to tick)
+- [x] Task 10: `make -C model/c test` green, including Review Focus 4–5 (22/22 on 2026-10-17; 23/23 since 8f7ed32, 2026-10-21, added `test_k_checked_before_align_and_addr`)
 - [ ] Task 11: directed engine suite green on QuestaSim; Verilator lint clean
 - [x] Task 12: `make -C model/c test` and `make -C model/c xcheck` green (2026-10-20)
 - [ ] Spec frozen (§6, §7.1) and O1/O2 recorded

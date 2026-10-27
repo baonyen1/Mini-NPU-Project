@@ -224,8 +224,8 @@ Mục lục: [1. Kiến trúc tổng thể](#1-kiến-trúc-tổng-thể) · [2.
 | **Spec** | Tài liệu thiết kế: hệ thống phải làm gì, giao diện ra sao. | `docs/superpowers/specs/2026-10-04-mini-npu-design.md`. |
 | **Plan** | Kế hoạch triển khai chia thành task, mỗi task có test định nghĩa "done". | `docs/superpowers/plans/2026-10-04-mini-npu-phase1.md`. |
 | **Track A / Track B** | Hai mảng việc: core / MAC engine. | Track A: Tấn. Track B: Bảo (từ 2026-10-15). |
-| **Freeze** (đóng băng) | Chốt giao diện; sau đó muốn sửa phải cả hai đồng ý. | §6 và §7.1 đóng băng cuối tuần 2. |
-| **D1…D10 / O1…O3** | Mã quyết định đã chốt / câu hỏi còn mở trong spec §3. | Ví dụ D10 = engine 4×4×4. |
+| **Freeze** (đóng băng) | Chốt giao diện; sau đó muốn sửa phải cả hai đồng ý. | §6 và §7.1: đề xuất đóng băng 2026-10-24; Bảo đã ký, chờ Tấn ký (D20 cho phép làm Task 11 trước). |
+| **D1…D22 / O1…O3** | Mã quyết định đã chốt / câu hỏi mở trong spec §3.2 (O1–O3 đều đã đóng). | Ví dụ D10 = engine 4×4×4. |
 | **SC1…SC6** | Tiêu chí thành công (spec §1). | Ví dụ SC5 = MNIST khớp bit-exact. |
 | **RQ / H / E** | Câu hỏi nghiên cứu / giả thuyết / thí nghiệm trong proposal. | E2 = so switching activity D0/D1 trên workload tổng hợp. |
 | **Review Focus** | Danh sách tình huống dễ sót mà plan bắt buộc phải có test. | 5 mục trong đầu plan. |

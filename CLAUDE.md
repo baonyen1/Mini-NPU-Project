@@ -45,8 +45,8 @@ Be honest. Say plainly when a design, claim or plan is weak, and why. Point out 
 
 | What | Where |
 |---|---|
-| Normative design: encodings, memory map, CSRs, interfaces, decisions D1–D13, open items O1–O3, success criteria SC1–SC6 | `docs/superpowers/specs/2026-10-04-mini-npu-design.md` |
-| Tasks, owners, status tables, "done" tests, Review Focus | `docs/superpowers/plans/`: phase 1 = weeks 1–4, phase 2 = 5–9, phase 3 = 10–12, phase 4 = 13–16 |
+| Normative design: encodings, memory map, CSRs, interfaces, decisions D1–D22, open items O1–O3, success criteria SC1–SC6 | `docs/superpowers/specs/2026-10-04-mini-npu-design.md` |
+| Tasks, owners, status tables, "done" tests, Review Focus | `docs/superpowers/plans/`: phase 1 = weeks 1–4, phase 2 = 5–9, phase 3 = 10–12, phase 4 = 13–16; week 1 = Mon 2026-10-12 (spec D22) |
 | Key numbers on one page | Phase 1 plan, "Global Constraints" |
 | The core as built: ISA table, internal encodings, illegal-instruction options (W2-1) | `docs/core_isa.md` |
 | Stall and flush design (approach A, central stall vector) | `docs/core_stall.md` |
@@ -82,7 +82,7 @@ Students work on Windows (PowerShell, `python`). CI runs on Ubuntu 24.04 (`pytho
 
 ```powershell
 # Core regression: the only automated check today, and exactly what CI runs
-python tools/rv32i_check/run_all.py        # all suites; exit 0 = PASS (7 suites incl. M, Zicsr, Zbb, custom-0, memory/RVVI)
+python tools/rv32i_check/run_all.py        # all suites; exit 0 = PASS (8 suites: RefISS hand values, ISA, hazard/random, M, Zicsr, Zbb/Zifencei, custom-0, memory/RVVI)
 python tools/rv32i_check/tests_isa.py      # one test per instruction, plus corner tests
 python tools/rv32i_check/tests_hazard.py   # directed hazard/control tests + 300 random programs
 $env:RV_PREFIX = "riscv-none-elf-"         # only if the binutils prefix is not auto-detected
@@ -102,9 +102,9 @@ tools/finish_task.sh "feat(core): M extension"               # Linux/macOS; SKIP
 - `run_all.py` fails on any failure not listed in `tools/rv32i_check/expected_failures.txt`. It **also** fails when a listed test starts passing; delete that line in the same commit.
 - `finish_task.*` runs `git add -A`. Check `git status` first so scratch files stay out of the commit.
 - Team workflow: each finished task is pushed right away, to `main` (section 3). When a task's "done" tests pass, remind the student to finish it with the script.
-- CI does not run `make -C model/c test` yet. ⚠️ unverified: its Makefile builds with `-fsanitize=address,undefined`, which MinGW gcc on Windows may not support. If linking fails, run it under WSL/Linux, or override `CFLAGS` without the sanitizers.
+- CI does not run `make -C model/c test` yet. MinGW gcc has no ASan runtime (`ld: cannot find -lasan`, noted in `model/c/Makefile` on 2026-10-21 and seen again 2026-10-26): on Windows use the UBSan-trap `CFLAGS` given in `model/c/Makefile` (it passed `make test` on Windows on 2026-10-26); the full ASan + UBSan build runs in WSL (green 2026-10-27).
 - These are planned but not in the repo yet:
-  - `sim/questa/run_mac_directed` (Task 11); `make -C sim/verilator lint` exists for `npu_pkg` + `dtcm_dp` and gains `rtl/npu/*.sv` in Task 11
+  - `sim/questa/run_mac_directed` (Task 11); `make -C sim/verilator lint` exists for `npu_pkg` + `dtcm_dp` and gains a `mac_engine` lint over `rtl/prim/*.sv` and `rtl/npu/*.sv` in Task 11 (package first)
   - `run.py --simulator {questa,xsim} --target <test|suite> [--config d0|d1] [--seeds N]` (Task 15)
 - Check that a file exists before telling anyone to run it.
 - Do not guess QuestaSim or xsim flags. Use the ones `docs/smoke/results.md` records once Task 0 is done.
@@ -192,16 +192,16 @@ This is a small design *inspired by* CoralNPU (`google-coral/coralnpu`, commit `
 - Before creating or editing a plan, spec or report, load the documentation skill and `superpowers:writing-plans` (when installed).
 - Plans go in `docs/superpowers/plans/YYYY-MM-DD-<name>.md`. Block notes go in `docs/<block>.md` (for example `docs/mac_engine.md`).
 
-## 10. Gotchas (as of 2026-10-26; update this list when it changes)
+## 10. Gotchas (as of 2026-10-28; update this list when it changes)
 
-- `sw/` and `power/` contain only READMEs. `tb/` holds only the directed `dtcm_dp` test (the UVM envs are empty), `sim/` only the Questa/Verilator smoke tests and `sim/verilator/Makefile`.
+- `sw/` holds only READMEs and the S5 input `sw/smoke/t.S`; `power/` holds only a README. `tb/` holds only the directed `dtcm_dp` test (the UVM envs are empty), `sim/` only the Questa/Verilator smoke tests and `sim/verilator/Makefile`.
 - `model/c` holds `npu_ref` (Task 10, done 2026-10-17): `make -C model/c test` is green. `ILLEGAL` wins over every other check, `K = 0` included (spec D16, decided 2026-10-23, Tấn confirms with the §6 freeze); RTL (Task 11) must follow. `rv_iss.c` exists (Task 12, done 2026-10-20).
 - QuestaSim 10.7c runs UVM, `randomize`, `covergroup` and DPI-C (Task 0, 2026-10-17; `docs/smoke/results.md`). Start it with `C:\questasim64_10.7c\win64` on PATH; use `-voptargs=+acc` whenever a VCD or waveform needs inner scopes. A DPI function cannot return `bit [31:0]` (use `int unsigned` or an output argument). Verilator 5.020 runs under WSL (Ubuntu 24.04) on Bảo's machine, not natively; S4 ran there on 2026-10-27 (the toy `icg_cell` behaves as on Questa), while `npu_clk_gate` and its pragma stay untested until Task 11. xsim was verified (S6) but Vivado is gone from that machine (see the next bullet).
 - On Bảo's machine `C:\Xilinx` (Vitis RISC-V gcc, Vivado) was found empty on 2026-10-26, so the core regression and `make -C model/c xcheck` run in WSL (`iverilog` 12, `binutils-riscv64-unknown-elf`); `wsl.exe` died after about 30 s while the host was out of RAM, so keep each WSL call short (one suite per call) or limit `memory=` in `%USERPROFILE%\.wslconfig`. A Windows checkout has CRLF (`core.autocrlf=true`): `test_export_roundtrip` (SHA-256 of `model/py/export/`) fails there although the committed blobs are right, and passes on LF content.
 - `tools/rv32i_check` builds `rtl/core/**/*.v` plus an explicit list in `run.py` (`core_tb_top.sv`, `core_tb_dtcm.sv`, `npu_stub.sv`, `rtl/mem/itcm.sv`) with `iverilog -g2012`. A new `.sv` file, or one that imports `npu_pkg`, is not picked up until that list is updated ([support]).
-- Since Task 8 the harness runs the core on the spec memory map (ITCM 16 KB, DTCM 64 KB at `0x0001_0000`, SIM MMIO) in `rtl/top/core_tb_top.sv`; the DTCM is still the port-A stand-in `core_tb_dtcm.sv`, although `rtl/mem/dtcm_dp.sv` now exists (2026-10-23; drop-in checked, see the Task 8 row of the Phase 1 plan). The swap changes `core_tb_top.sv` (instance and `peek`), `tb_dump.v` (`mem[k]` becomes `peek(k)`) and the file list in `run.py`. Every `compare()` also checks the whole RVVI retire trace against `RefISS`. It also requires the RTL to retire the program's `end: j end` (a core that stalls forever mid-program must fail) and compares the engine-stub CSRs (`npu_err`, `npu_busy_cyc`). `rtl/fpga/RISC_V_Fixed_Impl_Top.v` (parked) instantiates the old core ports and no longer matches `RISC_V_Top`.
+- Since Task 8 the harness runs the core on the spec memory map (ITCM 16 KB, DTCM 64 KB at `0x0001_0000`, SIM MMIO) in `rtl/top/core_tb_top.sv`; the DTCM is still the port-A stand-in `core_tb_dtcm.sv`, although `rtl/mem/dtcm_dp.sv` now exists (2026-10-23; the swap has not been run yet and is Tấn's call, see the Task 8 row of the Phase 1 plan). The swap changes `core_tb_top.sv` (instance and `peek`), `tb_dump.v` (`mem[k]` becomes `peek(k)`) and the file list in `run.py`. Every `compare()` also checks the whole RVVI retire trace against `RefISS`. It also requires the RTL to retire the program's `end: j end` (a core that stalls forever mid-program must fail) and compares the engine-stub CSRs (`npu_err`, `npu_busy_cyc`). `rtl/fpga/RISC_V_Fixed_Impl_Top.v` (parked) instantiates the old core ports and no longer matches `RISC_V_Top`.
 - `fence`, `ecall`, `ebreak` and unknown encodings execute as NOP until decision W2-1 is recorded (`docs/core_isa.md` §4).
-- The core uses active-high `reset`, while the engine interface (spec §7.1) uses `rst_n`. Change neither without a team decision at `npu_top`.
+- The core uses active-high `reset`, while the engine interface (spec §7.1) uses `rst_n`. D18 decides the bridge: `npu_top` drives `rst_n` from the core's `reset` through a synchronizer (async assert, sync release). Still open: async or sync reset flops in the engine, and the name `rst_n_sync` used in spec §8.
 - `npu_pkg.sv` lives in `rtl/top/` (2026-10-23; spec §12 fixed). A package alone has no top module, so `verilator --lint-only` and `iverilog` need a module that imports it. `GATING_EN` is a module parameter of `mac_engine`/`npu_top`, not a package constant.
 - The retrained 784-64-32-10 export is committed in `model/py/export/` (2026-10-23, D14, spec O2). It was produced on Linux; regenerating it elsewhere may change the last bits, so the committed files are the reference.
 - `model/py/golden_int8.py` (Task 2b, 2026-10-23) is the integer oracle; the notebook imports it. Its unit tests are the gate: `python -m pytest model/py/tests -v`. They compile `model/c/npu_ref.c` with the host gcc for the cross-check.
