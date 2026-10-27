@@ -21,7 +21,7 @@
 
 | Task | Owner | Status 2026-10-15 |
 |---|---|---|
-| 0 · Tool gate | Tấn: S1 UVM, S3 coverage, S5 toolchain, S6 xsim · Bảo: S2 DPI-C, S4 Verilator ICG, S7 VCD by scope | closed 2026-10-18: S1–S3, S5–S7 pass (`docs/smoke/results.md`); S4 Verilator part skipped by team decision |
+| 0 · Tool gate | Tấn: S1 UVM, S3 coverage, S5 toolchain, S6 xsim · Bảo: S2 DPI-C, S4 Verilator ICG, S7 VCD by scope | closed 2026-10-18: S1–S3, S5–S7 pass (`docs/smoke/results.md`); S4 Verilator part skipped on 2026-10-18 by team decision, then run on 2026-10-27 under WSL (testbench lint warnings, see `docs/smoke/results.md`) |
 | 1 · Core cleanup | Track A | done (`69cd798`) |
 | 2 · Week-2 freeze | both (Tấn: `docs/core_isa.md`, W2-1; Bảo: `npu_pkg.sv`, notebook retrain; both sign §6/§7.1) | open. `rtl/top/npu_pkg.sv` written 2026-10-23 (Verilator lint clean; QuestaSim 10.7c `vlog -sv` clean 2026-10-24, 0 errors 0 warnings); retrained export committed 2026-10-23 (D14, spec O1/O2 closed); only the §6/§7.1 sign-off remains: Bảo signed 2026-10-26, Tấn pending, and Task 11 does not wait for it (spec D20; freeze proposed 2026-10-24, D17–D19) |
 | 2b · `golden_int8.py` | Bảo | done 2026-10-23 (`model/py/golden_int8.py`, 13 tests incl. the `npu_ref` tile cross-check; notebook imports it, export bytes unchanged) |
@@ -440,7 +440,7 @@ Added 2026-10-21 (spec D14, D15). SC5 and Phase 4 name `golden_int8.py`, but no 
   5. CSR block (§6.4, D17): `npu_status` bits and W1C on the written value, `npu_busy_cyc`; `rd_ready = fifo_empty && fsm == IDLE`; READ_RESULT reads the accumulators combinationally. Reaches `t_w1c`, `t_read_while_busy`, `t_csr_write_semantics`.
   6. Reset (D18): `rst_n` active low; asserting it clears FIFO, FSM, error bits, `npu_busy_cyc` and accumulators, and WBUF/IBUF are not reset. Reaches `t_reset_state`.
   7. `npu_clk_gate` instance, `GATING_EN` passed down from `mac_engine`; in D0 its enable is tied to 1, so the whole suite is unchanged.
-- [ ] **Step 4:** Run the directed suite → all PASS. Run `make -C sim/verilator lint` → clean (Verilator is not installed on Bảo's machine, Task 0 S4: run it under WSL/Linux, or record the lint as not run). Record measured latencies in `docs/mac_engine.md`. Each must be ≤ K/4 + 3.
+- [ ] **Step 4:** Run the directed suite → all PASS. Run `make -C sim/verilator lint` → clean (Verilator 5.020 runs under WSL on Bảo's machine since 2026-10-27: run `make -C sim/verilator lint` there). Record measured latencies in `docs/mac_engine.md`. Each must be ≤ K/4 + 3.
 - [ ] **Step 5: Commit** `feat(npu): mac_engine D0 with directed DPI testbench`.
 
 ---
