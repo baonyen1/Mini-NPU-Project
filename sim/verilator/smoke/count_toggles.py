@@ -34,7 +34,12 @@ def main():
     inside = sum(per.get(c, 0) for c in range(lo, hi + 1))
     # Cycle 0 is start-up; cycles lo-1 and hi+1 hold the last fall / first rise
     # around the gated window, so they carry 1 toggle each. All others carry 2.
+    # A dump whose last record sits exactly on a cycle boundary (Verilator records the final
+    # falling edge at $finish time, QuestaSim does not) has one more cycle with a single edge:
+    # that cycle is cut short by the end of the run, so it is skipped like cycle 0.
     skip = {0, lo - 1, hi + 1}
+    if ch and ch[-1][0] % 10 == 0:
+        skip.add(ch[-1][0] // 10)
     steady = {c: n for c, n in per.items() if not lo <= c <= hi and c not in skip}
     edges = [per.get(c, 0) for c in (lo - 1, hi + 1)]
     print(f"{name}: toggles in cycles {lo}..{hi} = {inside}")
