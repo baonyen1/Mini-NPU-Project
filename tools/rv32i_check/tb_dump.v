@@ -19,7 +19,7 @@ module tb_dump;
         dumped = 1;
         f = $fopen("rtl_state.txt","w");
         for (k=1;k<32;k=k+1) $fwrite(f,"x%0d %08x\n",k,dut.u_core.DECODE_STAGE.REGFILE.regs[k]);
-        for (k=0;k<`MEM_WORDS;k=k+1) $fwrite(f,"m%0d %08x\n",k,dut.u_dtcm.mem[k]);
+        for (k=0;k<`MEM_WORDS;k=k+1) $fwrite(f,"m%0d %08x\n",k,dut.u_dtcm.peek(k));
         $fwrite(f,"npu_err %08x\n",dut.u_npu.err_q);               // engine-stub CSR state: a CSR write that
         $fwrite(f,"npu_busy_cyc %08x\n",dut.u_npu.busy_cyc_q);     // nothing reads back is still compared
         $fclose(f);

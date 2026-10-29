@@ -53,8 +53,8 @@ end: j end
 def build_wave_sim():
     """Same sources and defines as run.build_sim(), plus wave/wave_dump.v as a second top."""
     srcs = glob.glob(os.path.join(run.CORE, "**", "*.v"), recursive=True)
-    srcs += [os.path.join(run.ROOT, "rtl", "top", f) for f in ("core_tb_top.sv", "core_tb_dtcm.sv", "npu_stub.sv")]
-    srcs += [os.path.join(run.ROOT, "rtl", "mem", "itcm.sv")]
+    srcs += [os.path.join(run.ROOT, "rtl", "top", f) for f in ("npu_pkg.sv", "core_tb_top.sv", "npu_stub.sv")]
+    srcs += [os.path.join(run.ROOT, "rtl", "mem", f) for f in ("itcm.sv", "dtcm_dp.sv")]
     cmd = ["iverilog", "-g2012", "-DRVVI_TRACE", f"-DMEM_WORDS={run.CMP_WORDS}",
            "-o", "build/wave.vvp", "tb_dump.v", os.path.join("wave", "wave_dump.v")] + srcs
     subprocess.run(cmd, check=True)

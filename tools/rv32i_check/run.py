@@ -45,12 +45,13 @@ SIM_CTRL = 0x20000
 SIM_PUTC = 0x20004
 
 def build_sim():
-    """Compile the DUT with iverilog: the core, core_tb_top (ITCM, DTCM stand-in, SIM MMIO,
+    """Compile the DUT with iverilog: the core, core_tb_top (ITCM, dtcm_dp, SIM MMIO,
     engine stub) and tb_dump.v. RVVI_TRACE enables the retire-trace ports."""
     os.makedirs("build", exist_ok=True)
     srcs = glob.glob(os.path.join(CORE, "**", "*.v"), recursive=True)
-    srcs += [os.path.join(ROOT, "rtl", "top", f) for f in ("core_tb_top.sv", "core_tb_dtcm.sv", "npu_stub.sv")]
-    srcs += [os.path.join(ROOT, "rtl", "mem", "itcm.sv")]
+    # npu_pkg first: dtcm_dp imports it, and iverilog needs a package before its users.
+    srcs += [os.path.join(ROOT, "rtl", "top", f) for f in ("npu_pkg.sv", "core_tb_top.sv", "npu_stub.sv")]
+    srcs += [os.path.join(ROOT, "rtl", "mem", f) for f in ("itcm.sv", "dtcm_dp.sv")]
     cmd = ["iverilog", "-g2012", "-DRVVI_TRACE", f"-DMEM_WORDS={CMP_WORDS}", "-o", "build/sim.vvp", "tb_dump.v"] + srcs
     subprocess.run(cmd, check=True)
 

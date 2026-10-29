@@ -5,7 +5,7 @@
 //
 // Memory map (spec 4.1)
 //   0x0000_0000  16 KB  ITCM            instruction fetch only
-//   0x0001_0000  64 KB  DTCM            core data port A (stand-in until dtcm_dp exists)
+//   0x0001_0000  64 KB  DTCM            rtl/mem/dtcm_dp.sv, port A (port B unused: no engine here)
 //   0x0002_0000   4 B   SIM_CTRL        write-only: 0x1 PASS, 0x2 FAIL, 0x10 BATCH_DONE,
 //                                       0x20 MEAS_START, 0x21 MEAS_STOP
 //   0x0002_0004   4 B   SIM_PUTC        write-only: the low byte is printed
@@ -80,13 +80,21 @@ module core_tb_top (
     logic [31:0] dtcm_rdata;
     assign sel_dtcm = (dmem_addr[31:16] == 16'h0001);
 
-    core_tb_dtcm u_dtcm (
+    // Port B belongs to the engine; the core-only top has no engine, so it stays idle.
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic [npu_pkg::PORT_B_W-1:0] dtcm_b_rdata;
+    /* verilator lint_on UNUSEDSIGNAL */
+
+    dtcm_dp u_dtcm (
         .clk(clk),
-        .re(dmem_re && sel_dtcm),
-        .we(sel_dtcm ? dmem_we : 4'b0000),
-        .addr(dmem_addr[15:2]),
-        .wdata(dmem_wdata),
-        .rdata(dtcm_rdata)
+        .a_re(dmem_re && sel_dtcm),
+        .a_we(sel_dtcm ? dmem_we : 4'b0000),
+        .a_addr(dmem_addr[15:2]),
+        .a_wdata(dmem_wdata),
+        .a_rdata(dtcm_rdata),
+        .b_req(1'b0),
+        .b_addr('0),
+        .b_rdata(dtcm_b_rdata)
     );
 
     // The DTCM answers one cycle after a read request; remember whether that request was ours.
@@ -126,7 +134,7 @@ module core_tb_top (
     initial peek_en = $test$plusargs("PUSH_PEEK");
     always @(posedge clk) begin
         if (!reset && peek_en && cmd_valid && cmd_ready)
-            $display("PEEK %08x %08x", cmd_addr, u_dtcm.mem[cmd_addr[15:2]]);
+            $display("PEEK %08x %08x", cmd_addr, u_dtcm.peek(cmd_addr[15:2]));
     end
 
 `ifdef RVVI_TRACE

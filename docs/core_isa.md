@@ -296,7 +296,7 @@ The memories are outside the core. `RISC_V_Top` has:
 
 The load/store unit (`StageMemory/LSU.v`) stays in the core: `sb` replicates the byte and `sh` the half-word into every lane and sets the byte enables of the lane addressed; loads pick and extend the lane with the format and offset registered together with the request. A half-word store ignores address bit 0 and a word store ignores bits 1:0 (misaligned accesses are not detected until W2-1 is recorded).
 
-`rtl/top/core_tb_top.sv` decodes the bus (spec 4.1): ITCM `0x0000_0000` 16 KB (fetch only, `rtl/mem/itcm.sv`, a fetch outside returns a NOP), DTCM `0x0001_0000` 64 KB (`core_tb_dtcm.sv`, a stand-in for Track B's `dtcm_dp` port A), `SIM_CTRL` `0x0002_0000` and `SIM_PUTC` `0x0002_0004`. Any other data address, including the ITCM seen as data, reads 0 and ignores writes (W2-1 open). Open question for Task 13: spec 4.1 makes the ITCM fetch-only, but the Phase 2 plan puts `.rodata` in the ITCM; a load from the ITCM would then read 0.
+`rtl/top/core_tb_top.sv` decodes the bus (spec 4.1): ITCM `0x0000_0000` 16 KB (fetch only, `rtl/mem/itcm.sv`, a fetch outside returns a NOP), DTCM `0x0001_0000` 64 KB (`rtl/mem/dtcm_dp.sv` port A, since 2026-10-29; port B is idle in the core-only top), `SIM_CTRL` `0x0002_0000` and `SIM_PUTC` `0x0002_0004`. Any other data address, including the ITCM seen as data, reads 0 and ignores writes (W2-1 open). Open question for Task 13: spec 4.1 makes the ITCM fetch-only, but the Phase 2 plan puts `.rodata` in the ITCM; a load from the ITCM would then read 0.
 
 `SIM_CTRL` accepts word writes only: `0x1` prints `PASS` and ends the run, `0x2` prints `FAIL` and ends the run, `0x10`, `0x20`, `0x21` print `BATCH_DONE`, `MEAS_START`, `MEAS_STOP`. `SIM_PUTC` prints the low byte.
 

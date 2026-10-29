@@ -38,8 +38,8 @@ Artifacts go to `build/` (assembly, objects, binaries, `sim.vvp`, and for every
 `model/c` `rv_iss` tests).
 
 ## Memory map and DUT
-The RTL under test is `rtl/top/core_tb_top.sv`: the core, `rtl/mem/itcm.sv`, a DTCM stand-in
-(`rtl/top/core_tb_dtcm.sv`, port A only until Track B's `dtcm_dp` exists), SIM MMIO and the engine
+The RTL under test is `rtl/top/core_tb_top.sv`: the core, `rtl/mem/itcm.sv`, `rtl/mem/dtcm_dp.sv`
+(port A; port B stays idle without an engine), SIM MMIO and the engine
 stub, on the spec 4.1 map (ITCM 16 KB at 0, DTCM 64 KB at `0x0001_0000`, `SIM_CTRL` `0x0002_0000`,
 `SIM_PUTC` `0x0002_0004`). Test sources use the assembler symbol `DM` (= `0x0001_0000`) as the data
 base (`li x5,DM+0x40`). Data addresses outside the map read 0 and ignore writes (W2-1 is open).
