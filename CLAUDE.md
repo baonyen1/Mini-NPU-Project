@@ -104,7 +104,7 @@ tools/finish_task.sh "feat(core): M extension"               # Linux/macOS; SKIP
 - Team workflow: each finished task is pushed right away, to `main` (section 3). When a task's "done" tests pass, remind the student to finish it with the script.
 - CI does not run `make -C model/c test` yet. MinGW gcc has no ASan runtime (`ld: cannot find -lasan`, noted in `model/c/Makefile` on 2026-10-21 and seen again 2026-10-26): on Windows use the UBSan-trap `CFLAGS` given in `model/c/Makefile` (it passed `make test` on Windows on 2026-10-26); the full ASan + UBSan build runs in WSL (green 2026-10-27).
 - These are planned but not in the repo yet:
-  - `sim/questa/run_mac_directed` (Task 11); `make -C sim/verilator lint` exists for `npu_pkg` + `dtcm_dp` and gains a `mac_engine` lint over `rtl/prim/*.sv` and `rtl/npu/*.sv` in Task 11 (package first)
+  - `sim/questa/run_mac_directed` (Task 11); `make -C sim/verilator lint` exists for `npu_pkg` + `dtcm_dp` + `cmd_fifo` and gains a `mac_engine` lint over `rtl/prim/*.sv` and `rtl/npu/*.sv` in Task 11 (package first)
   - `run.py --simulator {questa,xsim} --target <test|suite> [--config d0|d1] [--seeds N]` (Task 15)
 - Check that a file exists before telling anyone to run it.
 - Do not guess QuestaSim or xsim flags. Use the ones `docs/smoke/results.md` records once Task 0 is done.
@@ -192,9 +192,10 @@ This is a small design *inspired by* CoralNPU (`google-coral/coralnpu`, commit `
 - Before creating or editing a plan, spec or report, load the documentation skill and `superpowers:writing-plans` (when installed).
 - Plans go in `docs/superpowers/plans/YYYY-MM-DD-<name>.md`. Block notes go in `docs/<block>.md` (for example `docs/mac_engine.md`).
 
-## 10. Gotchas (as of 2026-10-28; update this list when it changes)
+## 10. Gotchas (as of 2026-11-05; update this list when it changes)
 
-- `sw/` holds only READMEs and the S5 input `sw/smoke/t.S`; `power/` holds only a README. `tb/` holds only the directed `dtcm_dp` test (the UVM envs are empty), `sim/` only the Questa/Verilator smoke tests and `sim/verilator/Makefile`.
+- `sw/` holds only READMEs and the S5 input `sw/smoke/t.S`; `power/` holds only a README. `tb/` holds only the directed `dtcm_dp` and `cmd_fifo` tests (the UVM envs are empty; `cmd_fifo` is Task 11 stage 1, 2026-11-05, run with `make -C sim/verilator test_cmd_fifo` in WSL or `bash sim/questa/run_cmd_fifo.sh` with Questa on PATH, both at DEPTH 8 and 5). `sim/` holds the Questa/Verilator smoke tests, `sim/questa/run_cmd_fifo.sh` and `sim/verilator/Makefile`.
+- Task 11 is written by Claude stage by stage at Bảo's request (2026-11-05): stop after each stage until Bảo has read it and can explain it. D23 (error-bit set wins over a same-cycle W1C clear) is decided by Bảo but waits for Tấn's signature because §6 is frozen.
 - `model/c` holds `npu_ref` (Task 10, done 2026-10-17): `make -C model/c test` is green. `ILLEGAL` wins over every other check, `K = 0` included (spec D16, decided 2026-10-23, Tấn confirms with the §6 freeze); RTL (Task 11) must follow. `rv_iss.c` exists (Task 12, done 2026-10-20).
 - QuestaSim 10.7c runs UVM, `randomize`, `covergroup` and DPI-C (Task 0, 2026-10-17; `docs/smoke/results.md`). Start it with `C:\questasim64_10.7c\win64` on PATH; use `-voptargs=+acc` whenever a VCD or waveform needs inner scopes. A DPI function cannot return `bit [31:0]` (use `int unsigned` or an output argument). Verilator 5.020 runs under WSL (Ubuntu 24.04) on Bảo's machine, not natively; S4 ran there on 2026-10-27 (the toy `icg_cell` behaves as on Questa), while `npu_clk_gate` and its pragma stay untested until Task 11. xsim was verified (S6) but Vivado is gone from that machine (see the next bullet).
 - On Bảo's machine `C:\Xilinx` (Vitis RISC-V gcc, Vivado) was found empty on 2026-10-26, so the core regression and `make -C model/c xcheck` run in WSL (`iverilog` 12, `binutils-riscv64-unknown-elf`); `wsl.exe` died after about 30 s while the host was out of RAM, so keep each WSL call short (one suite per call) or limit `memory=` in `%USERPROFILE%\.wslconfig`. A Windows checkout has CRLF (`core.autocrlf=true`): `test_export_roundtrip` (SHA-256 of `model/py/export/`) fails there although the committed blobs are right, and passes on LF content.
