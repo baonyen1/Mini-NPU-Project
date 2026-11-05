@@ -1,5 +1,5 @@
 # Verilator targets (run under Linux or WSL; Verilator is not installed natively on Windows).
-#   make lint             -Wall lint of the engine-side RTL: dtcm_dp, cmd_fifo, mac_engine (Task 11 adds rtl/prim in stage 7)
+#   make lint             -Wall lint of the engine-side RTL: dtcm_dp, cmd_fifo, and mac_engine (with rtl/prim) in D0 and D1
 #   make test_dtcm_dp     build tb/directed/dtcm_dp_tb.sv and run it twice:
 #                         once with an empty memory, once with the +DTCM backdoor fixture
 #   make test_cmd_fifo    build tb/directed/cmd_fifo_tb.sv (Task 11 stage 1) and run it at DEPTH 8 and 5
@@ -13,7 +13,7 @@ TB        := $(ROOT)/tb/directed/dtcm_dp_tb.sv
 FIXTURE   := $(ROOT)/tb/directed/dtcm_init.hex
 FIFO      := $(ROOT)/rtl/npu/cmd_fifo.sv
 FIFO_TB   := $(ROOT)/tb/directed/cmd_fifo_tb.sv
-ENGINE    := $(FIFO) $(ROOT)/rtl/npu/mac_engine.sv
+ENGINE    := $(ROOT)/rtl/prim/npu_clk_gate.sv $(FIFO) $(ROOT)/rtl/npu/pe_array.sv $(ROOT)/rtl/npu/mac_engine.sv
 MAC_TB    := $(ROOT)/tb/uvm/common/npu_dpi_pkg.sv $(ROOT)/tb/directed/dtcm_model.sv $(ROOT)/tb/directed/mac_engine_tb.sv
 NPU_REF   := $(ROOT)/model/c/npu_ref.c
 BUILD     := build
@@ -24,6 +24,7 @@ lint:
 	$(VERILATOR) --lint-only -Wall --top-module dtcm_dp $(PKG) $(DTCM)
 	$(VERILATOR) --lint-only -Wall --top-module cmd_fifo $(PKG) $(FIFO)
 	$(VERILATOR) --lint-only -Wall --top-module mac_engine $(PKG) $(ENGINE)
+	$(VERILATOR) --lint-only -Wall --top-module mac_engine -GGATING_EN="1'b1" $(PKG) $(ENGINE)
 
 test_dtcm_dp: $(BUILD)/dtcm_tb/Vdtcm_dp_tb
 	./$(BUILD)/dtcm_tb/Vdtcm_dp_tb
@@ -51,7 +52,7 @@ test_mac_engine: $(BUILD)/mac_tb/Vmac_engine_tb
 
 # npu_ref.c is C: compiled by Verilator's make it would go through g++, the DPI symbols would get C++
 # names and the link fails, so it is built with gcc and handed over as an object file. -O0 on the
-# generated C++ keeps the build within a few minutes; the test is short, so speed does not matter.
+# generated C++ shortens the build; the test is short, so speed does not matter.
 $(BUILD)/npu_ref_c.o: $(NPU_REF) $(ROOT)/model/c/npu_ref.h
 	mkdir -p $(BUILD)
 	$(CC) -std=c99 -O1 -c -I$(ROOT)/model/c -o $@ $(NPU_REF)

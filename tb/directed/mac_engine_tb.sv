@@ -15,6 +15,8 @@
 // "RESULT: FAIL" and a $fatal.
 //
 //   +TEST=<name>   run only that test (default: all, in the order of TESTS below)
+//   -GGATING_EN=1  run against D1 (clock gating on); the default 0 is D0. Every test must give the same
+//                  result in both; t_clock_gate checks the clk_mac edges each configuration must have.
 //
 // Conventions: inputs change 1 ns after a rising edge (tick()); combinational outputs are read 1 ns
 // after the inputs they depend on change. The engine samples at the next rising edge.
@@ -27,7 +29,9 @@
 /* verilator lint_off WIDTHEXPAND */
 /* verilator lint_off BLKSEQ */
 /* verilator lint_off SYNCASYNCNET */
-module mac_engine_tb;
+module mac_engine_tb #(
+    parameter bit GATING_EN = 1'b0
+);
     import npu_pkg::*;
     import npu_dpi_pkg::*;
 
@@ -52,7 +56,7 @@ module mac_engine_tb;
     logic [QUAD_ADDR_W-1:0]  b_addr;
     logic [PORT_B_W-1:0]     b_rdata;
 
-    mac_engine dut (.*);
+    mac_engine #(.GATING_EN(GATING_EN)) dut (.*);
 
     dtcm_model u_dtcm (
         .clk     (clk),
@@ -902,6 +906,68 @@ module mac_engine_tb;
         end
         compare("latency");
         expect_errs("latency", 32'd0);
+
+        // Commands that do not execute (K = 0, every error, ILLEGAL) spend exactly one CHECK cycle.
+        begin
+            logic [1:0]  dops   [6] = '{OP_MAC, OP_MAC, OP_LDW,        OP_LDW,        OP_LDI, OP_ILLEGAL};
+            logic [31:0] daddrs [6] = '{BIG_W,  BIG_W,  32'h0001_0004, 32'h0000_0000, BIG_W,  BIG_W};
+            logic [31:0] dks    [6] = '{0,      6,      4,             4,             1028,   4};
+            for (int n = 0; n < 6; n++) begin
+                drain();
+                csr_addr    = CSR_NPU_STATUS;
+                n_busy_seen = 0;
+                count_busy  = 1'b1;
+                push(dops[n], daddrs[n], dks[n], 1'b1);
+                drain();
+                count_busy = 1'b0;
+                $display("  latency op %0d addr %08x K=%0d (not executed): %0d busy cycles", dops[n], daddrs[n], dks[n], n_busy_seen);
+                if (n_busy_seen != 1)
+                    report(2, $sformatf("op %0d addr %08x K=%0d is not executed but took %0d cycles, expected 1 (CHECK)",
+                                        dops[n], daddrs[n], dks[n], n_busy_seen));
+            end
+        end
+        compare("latency, dropped commands");
+        expect_errs("latency, dropped commands", ST_ERR_MASK);
+    endtask
+
+    // Spec 8: clk_mac (white-box, dut.clk_mac) has an edge at the end of a cycle exactly when
+    // en = !rst_n || fsm != IDLE || !fifo_empty held in that cycle; in D0 it has one in every cycle.
+    // For one command pushed into an idle engine the enable is 1 in the cycle after the push (IDLE,
+    // FIFO not empty) and in every busy cycle, so D1 must see busy + 1 edges, and none while idle.
+    int n_gclk = 0;
+    always @(posedge dut.clk_mac) n_gclk++;
+
+    task automatic t_clock_gate();
+        logic [1:0]  ops [4] = '{OP_LDW, OP_LDI, OP_MAC, OP_ILLEGAL};
+        logic [31:0] ks  [4] = '{1024, 8, 8, 4};
+        int edges, cycles;
+        reset_all();
+        repeat (3) tick();
+        n_gclk = 0;
+        repeat (20) tick();                            // idle: FIFO empty, FSM in IDLE
+        edges = n_gclk;
+        if (edges != (GATING_EN ? 0 : 20))
+            report(2, $sformatf("%0d clk_mac edges in 20 idle cycles, expected %0d", edges, GATING_EN ? 0 : 20));
+        for (int n = 0; n < 4; n++) begin
+            csr_addr    = CSR_NPU_STATUS;
+            n_busy_seen = 0;
+            n_gclk      = 0;
+            count_busy  = 1'b1;
+            push(ops[n], BIG_W, ks[n], 1'b1);
+            cycles = 1;                                // the cycle after the accepting edge
+            while (rd_ready !== 1'b1) begin tick(); cycles++; end
+            count_busy = 1'b0;
+            repeat (5) tick();                         // idle again: no further edges in D1
+            cycles += 5;
+            edges = n_gclk;
+            if (GATING_EN && edges != n_busy_seen + 1)
+                report(2, $sformatf("D1: op %0d K=%0d gave %0d clk_mac edges, expected busy %0d + 1",
+                                    ops[n], ks[n], edges, n_busy_seen));
+            if (!GATING_EN && edges != cycles)
+                report(2, $sformatf("D0: op %0d K=%0d gave %0d clk_mac edges in %0d cycles", ops[n], ks[n], edges, cycles));
+        end
+        compare("clock gate");
+        expect_errs("clock gate", ERR_ILL_B);
     endtask
 
     // ---- runner --------------------------------------------------------------------------------
@@ -909,7 +975,7 @@ module mac_engine_tb;
         "t_single_k4", "t_k8_layout", "t_k_kmax", "t_k0", "t_k_too_big", "t_k_mod4", "t_addr_oob",
         "t_addr_misaligned", "load_addr_wraps_32bit", "compute_k0_clr_keeps_acc", "t_illegal",
         "t_clr_vs_acc", "t_stale_quads", "t_wrap", "t_fifo_full", "t_read_while_busy", "t_w1c",
-        "t_csr_write_semantics", "t_reset_state", "t_latency"
+        "t_csr_write_semantics", "t_reset_state", "t_latency", "t_clock_gate"
     };
 
     task automatic run_one(input string name);
@@ -936,6 +1002,7 @@ module mac_engine_tb;
             "t_csr_write_semantics":    t_csr_write_semantics();
             "t_reset_state":            t_reset_state();
             "t_latency":                t_latency();
+            "t_clock_gate":             t_clock_gate();
             default: begin
                 $display("unknown test %s", name);
                 n_other++;
@@ -953,6 +1020,7 @@ module mac_engine_tb;
         string only;
         int    ran;
         bit    have_only;
+        $display("mac_engine_tb: configuration D%0d (GATING_EN = %0d)", GATING_EN, GATING_EN);
         have_only = $value$plusargs("TEST=%s", only);
         ran = 0;
         foreach (TESTS[n]) begin

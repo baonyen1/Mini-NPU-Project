@@ -2,12 +2,13 @@
 
 // MAC engine (spec 7; plan Task 11). Ports exactly as spec 7.1.
 //
-// Build stages (plan Task 11): 1 cmd_fifo; 2 (2026-11-05) the FSM with IDLE and CHECK, the D16 command
-// checks, the sticky error bits and the CSR block (spec 6.4, D17, D21, D23; the plan's stage 5, moved
-// here because the error bits are only visible through npu_status); 3 (2026-11-05) LOAD: port B and
-// WBUF/IBUF. Not yet built: MAC (stage 4: PE array, accumulators, READ_RESULT data), the clock gate
-// and GATING_EN (stage 7). Until then a COMPUTE that passes CHECK goes back to IDLE without effect
-// and rd_data is 0.
+// Built in the plan's stages (2026-11-05): 1 cmd_fifo; 2 the FSM, the D16 checks, the error bits and
+// the CSR block (the plan's stage 5, moved here because the error bits are only visible through
+// npu_status); 3 LOAD (port B, WBUF/IBUF); 4 MAC (pe_array, accumulators, READ_RESULT); 6 reset;
+// 7 the clock gate. Cycle timing, latencies and the decisions the spec left open: docs/mac_engine.md.
+//
+// GATING_EN (spec 8, D19): 0 = D0, clk_mac follows clk; 1 = D1, clk_mac runs only in cycles with
+// en = !rst_n || fsm != IDLE || !fifo_empty. Nothing else differs between D0 and D1.
 //
 // Cycle behaviour (free clock domain, spec 7.3):
 //   IDLE   leaves for CHECK in the cycle after the FIFO becomes non-empty.
@@ -18,7 +19,7 @@
 //            4. LOAD with addr[3:0] != 0         -> err_align
 //            5. LOAD with addr < DTCM_BASE or addr + 4K > DTCM_BASE + DTCM_BYTES, computed in 35 bits
 //               so it cannot wrap                -> err_addr
-//            6. otherwise the command executes (LOAD / MAC, stages 3 and 4)
+//            6. otherwise the command executes: LOAD or MAC, K/4 + 1 cycles each
 //          A dropped command takes one CHECK cycle; the error bit is set at the edge that ends it.
 //
 // CSRs (spec 6.4):
@@ -33,7 +34,9 @@
 // Reset (D18): rst_n active low, asynchronous assert; the release is synchronised in npu_top.
 module mac_engine
   import npu_pkg::*;
-(
+#(
+    parameter bit GATING_EN = 1'b0                   // 0: D0 (no gating), 1: D1 (spec 8, D19)
+) (
     // command push (core MEM stage -> engine)
     input  logic                    cmd_valid,
     output logic                    cmd_ready,
@@ -137,7 +140,7 @@ module mac_engine
 
     assign fifo_pop = in_check;
 
-    logic start_load, start_mac, load_done;
+    logic start_load, start_mac, load_done, mac_done;
 
     assign start_load = cmd_ok && op_load;
     assign start_mac  = cmd_ok && !op_load;
@@ -146,10 +149,11 @@ module mac_engine
         state_d = state_q;
         unique case (state_q)
             IDLE:    if (!fifo_empty) state_d = CHECK;
-            CHECK:   if (start_load)  state_d = LOAD; // stage 4: start_mac goes to MAC
-                     else             state_d = IDLE;
+            CHECK:   if (start_load)     state_d = LOAD;
+                     else if (start_mac) state_d = MAC;
+                     else                state_d = IDLE;
             LOAD:    if (load_done)   state_d = IDLE;
-            MAC:     state_d = IDLE;                  // not reachable before stage 4
+            MAC:     if (mac_done)    state_d = IDLE;
             default: state_d = IDLE;
         endcase
     end
@@ -208,21 +212,28 @@ module mac_engine
         endcase
     end
 
-    // ---- LOAD: port-B reads, free clock domain (spec 6.3, 7.1, 7.3) ---------------------------
+    // ---- LOAD and MAC sequencing, free clock domain (spec 6.3, 7.1, 7.3) -----------------------
     // CHECK latches the command (only one that will execute, so dropped commands toggle nothing).
-    // LOAD then issues one read per cycle for quads 0..S-1, S = K/4, at b_addr = base + s. The data of
-    // the read issued in cycle c is on b_rdata in cycle c+1 and is written into the buffer at the
-    // end of c+1, so LOAD lasts S+1 cycles and leaves only after the last write: every buffer write
-    // happens in LOAD (A-MAC-4), where the clock-gate enable is 1 (spec 8).
-    // Latency: CHECK + S+1 cycles of LOAD = K/4 + 2 cycles from the pop to IDLE (spec 7.2: <= K/4 + 3).
+    // Both LOAD and MAC walk steps s = 0..S-1, S = K/4, one per cycle, with one cycle of latency:
+    //   LOAD  issues port-B read s (b_addr = base + s) in cycle c; b_rdata is valid in c+1 and is
+    //         written into WBUF[s] or IBUF[s] at the end of c+1.
+    //   MAC   reads WBUF[s] and IBUF[s] (synchronous RAM read) in cycle c; the PE array adds the 16
+    //         dot products at the end of c+1. With clr, step 0 loads instead of adding.
+    // Each state lasts S+1 cycles and leaves only after its last write, so every buffer write is in
+    // LOAD (A-MAC-4), every accumulator update is in MAC, and the clock-gate enable is 1 in all of
+    // them (spec 8). Latency: CHECK + S+1 = K/4 + 2 cycles from the pop to IDLE (spec 7.2: <= K/4 + 3).
     localparam int unsigned STEP_W = BUF_IDX_W + 1;      // 9 bits: S = K/4 is 1..256
 
     logic [STEP_W-1:0]      steps_q;                     // S of the running command
-    logic [STEP_W-1:0]      req_cnt_q;                   // port-B reads issued so far
-    logic [QUAD_ADDR_W-1:0] qbase_q;                     // quad index of the command's first quad
-    logic                   load_ibuf_q;                 // 0: LDW writes WBUF, 1: LDI writes IBUF
-    logic                   wr_pend_q;                   // b_rdata holds a quad to write this cycle
-    logic [BUF_IDX_W-1:0]   wr_idx_q;                    // its buffer entry
+    logic [STEP_W-1:0]      req_cnt_q;                   // steps issued so far (port-B or buffer reads)
+    logic [QUAD_ADDR_W-1:0] qbase_q;                     // LOAD: quad index of the first quad
+    logic                   load_ibuf_q;                 // LOAD: 0 writes WBUF (LDW), 1 writes IBUF (LDI)
+    logic                   clr_q;                       // MAC: clr
+    logic                   wr_pend_q;                   // LOAD: b_rdata holds a quad to write this cycle
+    logic [BUF_IDX_W-1:0]   wr_idx_q;                    // LOAD: its buffer entry
+    logic                   buf_rd;                      // MAC: read WBUF[s] and IBUF[s] this cycle
+    logic                   step_q;                      // MAC: the buffer read data are valid this cycle
+    logic                   first_q;                     // MAC: ... and they are step 0
     logic [QUAD_ADDR_W-1:0] head_qidx;                   // (head.addr - DTCM_BASE) >> 4
 
     // Quad index of an executing LOAD: subtracting only the quad-index bits [15:4] is exact because
@@ -234,6 +245,8 @@ module mac_engine
     // base + S, which wraps to 0 for a LOAD that ends at the top of the DTCM; it is unused then.
     assign b_addr    = qbase_q + QUAD_ADDR_W'(req_cnt_q);
     assign load_done = (state_q == LOAD) && wr_pend_q && (req_cnt_q == steps_q);
+    assign buf_rd    = (state_q == MAC) && (req_cnt_q != steps_q);
+    assign mac_done  = (state_q == MAC) && step_q && (req_cnt_q == steps_q);
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -241,43 +254,83 @@ module mac_engine
             req_cnt_q   <= '0;
             qbase_q     <= '0;
             load_ibuf_q <= 1'b0;
+            clr_q       <= 1'b0;
             wr_pend_q   <= 1'b0;
             wr_idx_q    <= '0;
+            step_q      <= 1'b0;
+            first_q     <= 1'b0;
         end else begin
             if (cmd_ok) begin
                 steps_q     <= head.k[2 +: STEP_W];      // K/4; K <= KMAX after CHECK
                 req_cnt_q   <= '0;
                 qbase_q     <= head_qidx;
                 load_ibuf_q <= (head.op == OP_LDI);
-            end else if (b_req) begin
+                clr_q       <= head.clr;
+            end else if (b_req || buf_rd) begin
                 req_cnt_q   <= req_cnt_q + 1'b1;
             end
             wr_pend_q <= b_req;
             if (b_req) wr_idx_q <= req_cnt_q[BUF_IDX_W-1:0];
+            step_q  <= buf_rd;
+            first_q <= buf_rd && (req_cnt_q == '0);
         end
     end
 
-    // ---- WBUF / IBUF, gated clock domain (spec 7.2, 7.3) --------------------------------------
-    // 256 x 128 bit each, synchronous single-port RAM style, not reset (spec 7.2, D18). Stage 7
-    // replaces clk_mac = clk by the npu_clk_gate output; it is derived by continuous assignment only,
-    // so clk_mac flops sample the free-domain registers (wr_pend_q, wr_idx_q) before they update.
-    logic clk_mac;
-    assign clk_mac = clk;
+    // ---- WBUF / IBUF and the PE array, gated clock domain (spec 7.2, 7.3) ----------------------
+    // 256 x 128 bit each, synchronous single-port RAM style: written in LOAD, read in MAC, never both
+    // in one cycle (one command at a time). Not reset (spec 7.2, D18): an entry is read only after a
+    // LOAD wrote it (a test rule, spec 7.2), and the read registers are used only while step_q.
+    // clk_mac comes from npu_clk_gate through continuous assignments only (latch + AND), so at a
+    // common edge the clk_mac flops sample the free-domain registers before those update.
+    // Enable (spec 8): every term is registered state or the already synchronised rst_n, so it is
+    // stable while the latch is open. A push at cycle t makes fifo_empty 0 at t+1 and the first gated
+    // edge comes at the end of t+1, before any clk_mac flop needs one: CHECK uses none, and LOAD's
+    // first write and MAC's first read are later. Each LOAD/MAC edge falls in a non-IDLE cycle, so D1
+    // takes the same cycles as D0 (SC3). !rst_n keeps clk_mac running during reset (spec 8).
+    logic clk_en, clk_mac;
+
+    assign clk_en = !rst_n || (state_q != IDLE) || !fifo_empty;
+
+    npu_clk_gate #(
+        .GATING_EN (GATING_EN)
+    ) u_clk_gate (
+        .clk     (clk),
+        .en      (clk_en),
+        .test_en (1'b0),
+        .gclk    (clk_mac)
+    );
 
     logic [PORT_B_W-1:0] wbuf [BUF_DEPTH];
     logic [PORT_B_W-1:0] ibuf [BUF_DEPTH];
+    logic [PORT_B_W-1:0] w_rd_q, x_rd_q;                 // WBUF[s], IBUF[s] read in the previous cycle
 
     always_ff @(posedge clk_mac) begin
         if (wr_pend_q && !load_ibuf_q) wbuf[wr_idx_q] <= b_rdata;
         if (wr_pend_q &&  load_ibuf_q) ibuf[wr_idx_q] <= b_rdata;
+        if (buf_rd) begin
+            w_rd_q <= wbuf[req_cnt_q[BUF_IDX_W-1:0]];
+            x_rd_q <= ibuf[req_cnt_q[BUF_IDX_W-1:0]];
+        end
     end
+
+    logic [PE_ROWS*PE_COLS-1:0][31:0] acc;
+
+    pe_array u_pe (
+        .clk    (clk_mac),
+        .rst_n  (rst_n),
+        .step   (step_q),
+        .load   (first_q && clr_q),
+        .w_quad (w_rd_q),
+        .x_quad (x_rd_q),
+        .acc    (acc)
+    );
 
     // ---- result read ---------------------------------------------------------------------------
     assign rd_ready = fifo_empty && (state_q == IDLE);   // spec 7.1, A-MAC-2
-    assign rd_data  = 32'd0;                             // stage 4: acc[rd_idx], combinational
+    assign rd_data  = acc[rd_idx];                       // READ_RESULT, combinational (spec 7.3)
 
     // rd_req is never needed: rd_data depends on rd_idx alone and the core qualifies it with rd_ready
-    // (spec 7.1). rd_idx, head.clr, start_mac and the buffer contents are used from stage 4.
+    // (spec 7.1).
     logic unused_ok;
-    assign unused_ok = ^{rd_req, rd_idx, head.clr, start_mac, wbuf[wr_idx_q], ibuf[wr_idx_q]};
+    assign unused_ok = rd_req;
 endmodule
