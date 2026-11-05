@@ -4,7 +4,7 @@
 #                         once with an empty memory, once with the +DTCM backdoor fixture
 #   make test_cmd_fifo    build tb/directed/cmd_fifo_tb.sv (Task 11 stage 1) and run it at DEPTH 8 and 5
 #   make test_mac_engine  build tb/directed/mac_engine_tb.sv with the npu_ref DPI model and run all tests
-#                         (the C++ build takes a few minutes; QuestaSim: sim/questa/run_mac_directed.sh)
+#                         (the g++ step can take more than 10 minutes; QuestaSim: sim/questa/run_mac_directed.sh)
 VERILATOR ?= verilator
 ROOT      := ../..
 PKG       := $(ROOT)/rtl/top/npu_pkg.sv

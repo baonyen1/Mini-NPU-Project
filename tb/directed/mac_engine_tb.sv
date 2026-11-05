@@ -20,11 +20,13 @@
 // after the inputs they depend on change. The engine samples at the next rising edge.
 // Waived for this testbench only: helper arguments are plain ints narrowed to port widths (WIDTH*),
 // some DUT outputs are only read in some tests (UNUSEDSIGNAL), and the negedge monitors count
-// mismatches with blocking updates of testbench variables, which is not sequential logic (BLKSEQ).
+// mismatches with blocking updates of testbench variables, which is not sequential logic (BLKSEQ),
+// and they test rst_n as data while the engine uses it as an asynchronous reset (SYNCASYNCNET).
 /* verilator lint_off UNUSEDSIGNAL */
 /* verilator lint_off WIDTHTRUNC */
 /* verilator lint_off WIDTHEXPAND */
 /* verilator lint_off BLKSEQ */
+/* verilator lint_off SYNCASYNCNET */
 module mac_engine_tb;
     import npu_pkg::*;
     import npu_dpi_pkg::*;
@@ -77,20 +79,41 @@ module mac_engine_tb;
 
     // ---- bookkeeping ---------------------------------------------------------------------------
     string cur = "(none)";
-    int    n_status, n_value, n_other;                 // mismatches in the current test
+    int    n_status, n_value, n_buffer, n_other;       // mismatches in the current test
     int    n_failed = 0;
     string results [$];
     int unsigned exp_reads = 0;                        // port-B reads expected so far (see load_quads)
+
+    // Shadow of WBUF/IBUF: what each entry must hold after the LOADs pushed so far (spec 6.3). Only
+    // entries written since the last reset are compared; the RTL buffers are not reset (spec 7.2).
+    // compare() reads dut.wbuf / dut.ibuf hierarchically: a white-box check, so that LOAD can be
+    // proved (plan stage 3) before COMPUTE exists, and buffer corruption stays visible afterwards.
+    logic [PORT_B_W-1:0] exp_wbuf [BUF_DEPTH];
+    logic [PORT_B_W-1:0] exp_ibuf [BUF_DEPTH];
+    bit                  wbuf_valid [BUF_DEPTH];
+    bit                  ibuf_valid [BUF_DEPTH];
 
     function automatic void report(input int kind, input string msg);
         string cls;
         case (kind)
             0:       begin n_status++; cls = "status"; end
             1:       begin n_value++;  cls = "value";  end
+            3:       begin n_buffer++; cls = "buffer"; end
             default: begin n_other++;  cls = "other";  end
         endcase
-        if (n_status + n_value + n_other <= 6) $display("  FAIL [%s] %s: %s", cur, cls, msg);
+        if (n_status + n_value + n_buffer + n_other <= 6) $display("  FAIL [%s] %s: %s", cur, cls, msg);
     endfunction
+
+    // Resets every testbench-side model: npu_ref (its DTCM too), dtcm_model, the read count, the shadow.
+    task automatic model_reset();
+        npu_ref_reset();
+        u_dtcm.clear();
+        exp_reads = 0;
+        for (int s = 0; s < BUF_DEPTH; s++) begin
+            wbuf_valid[s] = 1'b0;
+            ibuf_valid[s] = 1'b0;
+        end
+    endtask
 
     task automatic tick();
         @(posedge clk);
@@ -104,9 +127,7 @@ module mac_engine_tb;
         csr_we    = 1'b0;
         csr_addr  = CSR_NPU_STATUS;
         rst_n     = 1'b0;
-        npu_ref_reset();
-        u_dtcm.clear();
-        exp_reads = 0;
+        model_reset();
         repeat (2) tick();
         rst_n = 1'b1;                                  // released just after an edge (npu_top synchronises it)
         tick();
@@ -137,6 +158,37 @@ module mac_engine_tb;
         return k / 4;
     endfunction
 
+    // Called at the push: the WAR rule (spec 6.3 rule 5) keeps these DTCM words unchanged until the
+    // LOAD has run, so the quads can be taken now.
+    task automatic shadow_load(input logic [1:0] op, input logic [31:0] addr, input int unsigned quads);
+        int unsigned w;
+        logic [PORT_B_W-1:0] q;
+        for (int unsigned s = 0; s < quads; s++) begin
+            w = ((addr - DTCM_BASE) >> 2) + 4 * s;
+            q = {u_dtcm.mem[w + 3], u_dtcm.mem[w + 2], u_dtcm.mem[w + 1], u_dtcm.mem[w]};
+            if (op == OP_LDW) begin exp_wbuf[s] = q; wbuf_valid[s] = 1'b1; end
+            else              begin exp_ibuf[s] = q; ibuf_valid[s] = 1'b1; end
+        end
+    endtask
+
+    task automatic check_buffers(input string where);
+        int bad;
+        bad = 0;
+        for (int s = 0; s < BUF_DEPTH; s++) begin
+            // (no bad++ inside the if condition: Verilator 5.020 stops with an internal error on it)
+            if (wbuf_valid[s] && dut.wbuf[s] !== exp_wbuf[s]) begin
+                if (bad < 2) report(3, $sformatf("%s: WBUF[%0d] = %032x, expected %032x", where, s, dut.wbuf[s], exp_wbuf[s]));
+                else n_buffer++;
+                bad++;
+            end
+            if (ibuf_valid[s] && dut.ibuf[s] !== exp_ibuf[s]) begin
+                if (bad < 2) report(3, $sformatf("%s: IBUF[%0d] = %032x, expected %032x", where, s, dut.ibuf[s], exp_ibuf[s]));
+                else n_buffer++;
+                bad++;
+            end
+        end
+    endtask
+
     // Present one command and hold it until the engine accepts it. Consecutive calls are back to back.
     task automatic push(input logic [1:0] op, input logic [31:0] addr, input logic [31:0] k, input logic clr);
         int waited;
@@ -155,6 +207,7 @@ module mac_engine_tb;
         @(posedge clk);                                // accepted at this edge
         npu_ref_cmd(op, addr, k, clr);
         exp_reads += load_quads(op, addr, k);
+        shadow_load(op, addr, load_quads(op, addr, k));
         #1 cmd_valid = 1'b0;
         last_push_wait = waited;
     endtask
@@ -200,6 +253,7 @@ module mac_engine_tb;
             report(0, $sformatf("%s: npu_status %08x, npu_ref %08x", where, st, npu_ref_status()));
         if (u_dtcm.n_reads !== exp_reads)
             report(2, $sformatf("%s: %0d port-B reads, expected %0d", where, u_dtcm.n_reads, exp_reads));
+        check_buffers(where);
         for (int idx = 0; idx < 16; idx++) begin
             rd_idx = idx;
             rd_req = 1'b1;
@@ -352,6 +406,17 @@ module mac_engine_tb;
         end
     end
 
+    // A-MAC-3 (b_req only in LOAD) and A-MAC-4 (buffers never written outside LOAD), white-box on
+    // mac_engine's state_q and buffer write strobe until Phase 2 binds the SVA. A buffer write outside
+    // LOAD is invisible in D0 but is lost in D1, where clk_mac is gated in IDLE (spec 8).
+    localparam logic [1:0] FSM_LOAD = 2'd2;            // mac_engine state_e encoding of LOAD
+    always @(negedge clk) begin
+        if (rst_n) begin
+            if (b_req && dut.state_q !== FSM_LOAD)    report(2, $sformatf("A-MAC-3: b_req in state %0d", dut.state_q));
+            if (dut.wr_pend_q && dut.state_q !== FSM_LOAD) report(2, $sformatf("A-MAC-4: buffer write in state %0d", dut.state_q));
+        end
+    end
+
     // Counts busy cycles from outside: npu_status.busy, sampled in the middle of each cycle while the
     // testbench holds csr_addr at npu_status.
     bit count_busy = 1'b0;
@@ -455,12 +520,19 @@ module mac_engine_tb;
             expect_dropped(loads[o], 32'h0001_FFF0, 8, 1'b0, ERR_ADDR_B);     // runs past the end
             expect_dropped(loads[o], 32'h0002_0000, 4, 1'b0, ERR_ADDR_B);     // starts at the end
             expect_dropped(loads[o], 32'h0001_F010, 1024, 1'b0, ERR_ADDR_B);  // K=KMAX, 16 bytes too far
-            // legal edge cases: no error
+            // legal edge cases: no error. Random data everywhere, and each LOAD checked on its own, so
+            // the buffer shadow sees every quad-index bit: the high quads (0x800..0xFFF) are distinct.
             reset_all();
-            push(loads[o], 32'h0001_FFF0, 4, 1'b0);                           // the last quad
+            rng = 32'hA11C_E5E0 + o;
+            fill_random(DTCM_BASE, DTCM_BYTES / 4);
+            push(loads[o], DTCM_BASE, 1024, 1'b0);                            // the first 256 quads
+            compare("legal edge: base, K=1024");
             push(loads[o], 32'h0001_F000, 1024, 1'b0);                        // ends exactly at the end
-            push(loads[o], DTCM_BASE, 1024, 1'b0);
-            compare("legal edge loads");
+            compare("legal edge: 0x1F000, K=1024");
+            push(loads[o], 32'h0001_8000, 64, 1'b0);                          // quad 0x800: bit 11
+            compare("legal edge: 0x18000, K=64");
+            push(loads[o], 32'h0001_FFF0, 4, 1'b0);                           // the last quad
+            compare("legal edge: last quad");
             expect_errs("legal edge loads", 32'd0);
         end
     endtask
@@ -801,10 +873,35 @@ module mac_engine_tb;
                 tick();
             end
         end
-        npu_ref_reset();                               // resynchronise the model (its DTCM too)
-        u_dtcm.clear();
-        exp_reads = 0;
+        model_reset();                                 // resynchronise the models (npu_ref's DTCM too)
         compare("after reset");
+    endtask
+
+    // A-MAC-5 and docs/mac_engine.md: busy cycles of one command on an idle engine, i.e. from the pop
+    // (CHECK) back to IDLE. Spec 7.2 bounds it by K/4 + 3; one quad per cycle at most (one port-B read,
+    // one PE step) bounds an executed LOAD or COMPUTE from below by CHECK + K/4 = K/4 + 1. The
+    // measured values are printed for the latency table.
+    task automatic t_latency();
+        logic [1:0]  ops [9] = '{OP_LDW, OP_LDI, OP_LDW, OP_LDI, OP_LDW, OP_LDI, OP_MAC, OP_MAC, OP_MAC};
+        logic [31:0] ks  [9] = '{4,      4,      8,      8,      1024,   1024,   4,      8,      1024};
+        int lat;
+        reset_all();
+        for (int n = 0; n < 9; n++) begin
+            drain();
+            csr_addr    = CSR_NPU_STATUS;
+            n_busy_seen = 0;
+            count_busy  = 1'b1;
+            push(ops[n], BIG_W, ks[n], 1'b1);
+            drain();
+            count_busy = 1'b0;
+            lat = n_busy_seen;
+            $display("  latency op %0d K=%0d: %0d busy cycles (K/4+2 = %0d, bound K/4+3 = %0d)",
+                     ops[n], ks[n], lat, ks[n] / 4 + 2, ks[n] / 4 + 3);
+            if (lat > ks[n] / 4 + 3) report(2, $sformatf("op %0d K=%0d took %0d cycles, bound %0d (A-MAC-5)", ops[n], ks[n], lat, ks[n] / 4 + 3));
+            if (lat < ks[n] / 4 + 1) report(2, $sformatf("op %0d K=%0d took %0d cycles, below K/4+1: steps were skipped", ops[n], ks[n], lat));
+        end
+        compare("latency");
+        expect_errs("latency", 32'd0);
     endtask
 
     // ---- runner --------------------------------------------------------------------------------
@@ -812,12 +909,12 @@ module mac_engine_tb;
         "t_single_k4", "t_k8_layout", "t_k_kmax", "t_k0", "t_k_too_big", "t_k_mod4", "t_addr_oob",
         "t_addr_misaligned", "load_addr_wraps_32bit", "compute_k0_clr_keeps_acc", "t_illegal",
         "t_clr_vs_acc", "t_stale_quads", "t_wrap", "t_fifo_full", "t_read_while_busy", "t_w1c",
-        "t_csr_write_semantics", "t_reset_state"
+        "t_csr_write_semantics", "t_reset_state", "t_latency"
     };
 
     task automatic run_one(input string name);
         cur = name;
-        n_status = 0; n_value = 0; n_other = 0;
+        n_status = 0; n_value = 0; n_buffer = 0; n_other = 0;
         case (name)
             "t_single_k4":              t_single_k4();
             "t_k8_layout":              t_k8_layout();
@@ -838,15 +935,17 @@ module mac_engine_tb;
             "t_w1c":                    t_w1c();
             "t_csr_write_semantics":    t_csr_write_semantics();
             "t_reset_state":            t_reset_state();
+            "t_latency":                t_latency();
             default: begin
                 $display("unknown test %s", name);
                 n_other++;
             end
         endcase
-        if (n_status + n_value + n_other == 0) results.push_back($sformatf("PASS  %s", name));
+        if (n_status + n_value + n_buffer + n_other == 0) results.push_back($sformatf("PASS  %s", name));
         else begin
             n_failed++;
-            results.push_back($sformatf("FAIL  %s status %0d  value %0d  other %0d", name, n_status, n_value, n_other));
+            results.push_back($sformatf("FAIL  %s status %0d  value %0d  buffer %0d  other %0d",
+                                        name, n_status, n_value, n_buffer, n_other));
         end
     endtask
 

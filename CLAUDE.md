@@ -104,7 +104,7 @@ tools/finish_task.sh "feat(core): M extension"               # Linux/macOS; SKIP
 - Team workflow: each finished task is pushed right away, to `main` (section 3). When a task's "done" tests pass, remind the student to finish it with the script.
 - CI does not run `make -C model/c test` yet. MinGW gcc has no ASan runtime (`ld: cannot find -lasan`, noted in `model/c/Makefile` on 2026-10-21 and seen again 2026-10-26): on Windows use the UBSan-trap `CFLAGS` given in `model/c/Makefile` (it passed `make test` on Windows on 2026-10-26); the full ASan + UBSan build runs in WSL (green 2026-10-27).
 - These are planned but not in the repo yet:
-  - `make -C sim/verilator lint` covers `dtcm_dp`, `cmd_fifo` and `mac_engine` (package first) and gains `rtl/prim/*.sv` in Task 11 stage 7. The Task 11 directed suite exists since 2026-11-05: `bash sim/questa/run_mac_directed.sh [test]` (Git Bash, Questa on PATH) and `make -C sim/verilator test_mac_engine` (WSL; the C++ build takes minutes, so give the WSL call a long timeout)
+  - `make -C sim/verilator lint` covers `dtcm_dp`, `cmd_fifo` and `mac_engine` (package first) and gains `rtl/prim/*.sv` in Task 11 stage 7. The Task 11 directed suite exists since 2026-11-05: `bash sim/questa/run_mac_directed.sh [test]` (Git Bash, Questa on PATH) and `make -C sim/verilator test_mac_engine` (WSL; the g++ step on the generated testbench finished within a 10-minute WSL session at stage 2 but not at stage 3, 2026-11-05, so QuestaSim is the reference for that suite)
   - `run.py --simulator {questa,xsim} --target <test|suite> [--config d0|d1] [--seeds N]` (Task 15)
 - Check that a file exists before telling anyone to run it.
 - Do not guess QuestaSim or xsim flags. Use the ones `docs/smoke/results.md` records once Task 0 is done.

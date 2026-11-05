@@ -18,5 +18,5 @@ vlog -sv -work out/work_mac \
 PLUS=""
 [ $# -ge 1 ] && PLUS="+TEST=$1"
 vsim -c -lib out/work_mac -sv_lib "${LIB%.*}" mac_engine_tb $PLUS -do "run -all; quit -f" > out/mac_vsim.log 2>&1
-grep -E "^# (PASS|FAIL|  FAIL|RESULT|---- |\*\* (Error|Fatal))" out/mac_vsim.log | sed 's/^# //'
+grep -E "^# (PASS|FAIL|  FAIL|  latency|RESULT|---- |\*\* (Error|Fatal))" out/mac_vsim.log | sed 's/^# //'
 grep -q "RESULT: PASS" out/mac_vsim.log
