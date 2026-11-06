@@ -59,8 +59,12 @@ module mac_tb_top;
         .b_req        (b_req),
         .b_addr       (b_addr),
         .buf_we       (wr_pend_q),
-        .head_k       (head.k)
+        .head_k       (head.k),
+        .head_addr    (head.addr)
     );
+
+    // the pop marker of mac_cmd_if (state CHECK = 1, see mac_probe_if)
+    assign cmd_if.eng_pop = (dut.u_probe.state == 2'd1);
 
     bind mac_engine mac_probe_if u_probe (
         .clk        (clk),

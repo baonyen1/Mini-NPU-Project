@@ -2,8 +2,9 @@
 // Included by mac_env_pkg. cg_gate (D1 only) is added in Phase 3.
 //
 // Who samples what:
-//   mac_predictor  cg_cmd, cg_operand, cg_acc, cg_err, cg_addr: at each pushed command or CSR write, in
-//                  program order, with values from npu_ref (the model's state before and after it)
+//   mac_predictor  cg_cmd, cg_operand, cg_acc, cg_err, cg_addr: at each command's CHECK (when the engine
+//                  pops it) or CSR write, in the order the engine applies them, with values from npu_ref
+//                  (the model's state before and after it)
 //   run_phase      cg_fifo and cg_state: every clock edge, from the bound probe (FIFO count, FSM state)
 //                  and the command interface (push attempts, READ while busy)
 
@@ -151,15 +152,17 @@ class mac_coverage extends uvm_component;
         cg_err.sample(bit_pos, ev);
     endfunction
 
-    function void sample_addr(bit [31:0] addr, bit [31:0] k);
+    // executes: the LOAD passed CHECK; err_addr: CHECK dropped it with err_addr (mac_cmd_fate)
+    function void sample_addr(bit [31:0] addr, bit [31:0] k, bit executes, bit err_addr);
         longint unsigned last, dtcm_end;
         last     = longint'(addr) + 4 * longint'(k);           // one past the last byte
         dtcm_end = longint'(DTCM_BASE) + DTCM_BYTES;
-        // first quad: starts at DTCM_BASE; last quad: a non-empty LOAD that ends exactly at the end of the
-        // DTCM; one quad past the end: it ends exactly 16 bytes beyond (err_addr by the smallest margin)
-        cg_addr.sample(addr == DTCM_BASE,
-                       k != 0 && addr >= DTCM_BASE && last == dtcm_end,
-                       k != 0 && addr >= DTCM_BASE && last == dtcm_end + QUAD_BYTES,
+        // first quad: a LOAD that executes and starts at DTCM_BASE; last quad: one that executes and ends
+        // exactly at the end of the DTCM; one quad past the end: an err_addr LOAD that ends exactly 16 bytes
+        // beyond (err_addr by the smallest margin). A LOAD dropped for K or alignment counts in none.
+        cg_addr.sample(executes && addr == DTCM_BASE,
+                       executes && last == dtcm_end,
+                       err_addr && addr >= DTCM_BASE && last == dtcm_end + QUAD_BYTES,
                        addr[3:0]);
     endfunction
 

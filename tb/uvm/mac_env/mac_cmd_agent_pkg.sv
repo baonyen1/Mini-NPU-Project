@@ -4,20 +4,24 @@
 // 10.1; Phase 2 Task 16).
 //
 //   mac_cmd_item     one transaction: PUSH (cmd_* handshake), READ (rd_req until rd_ready), CSR_RD,
-//                    CSR_WR, or RESET (seen by the monitor only). gap = idle cycles before it.
+//                    CSR_WR, or, seen by the monitor only, RESET and POP (the engine pops the FIFO head
+//                    in CHECK). gap = idle cycles before it. rdata is 4-state, so an X or Z the DUT
+//                    returns reaches the scoreboard as such.
 //   mac_cmd_driver   drives items through mac_cmd_if.drv_cb; READ and CSR_RD return rdata in the item,
 //                    PUSH and READ return the cycles they waited (wait_cycles).
 //   mac_cmd_monitor  turns what happened at each rising edge into items, in the order the golden model
-//                    must see them within one cycle: RESET, CSR_RD, READ, CSR_WR, PUSH (a CSR read sees
-//                    the state before the edge; a W1C in the cycle of a push cannot clear that
-//                    command's error, which the engine raises later in CHECK).
+//                    must see them within one cycle: RESET, CSR_RD, READ, CSR_WR, POP, PUSH. A CSR read
+//                    sees the state before the edge. A W1C before the POP of the same edge is D23: the
+//                    engine sets the popped command's error bit at that edge and the set wins, so the
+//                    model applies the W1C first and the command after it. The FIFO holds the head
+//                    before the edge, so a PUSH of the same edge is never the command popped.
 //   mac_cmd_agent    sequencer + driver + monitor; ap carries the monitor's items.
 package mac_cmd_agent_pkg;
     import uvm_pkg::*;
     `include "uvm_macros.svh"
     import npu_pkg::*;
 
-    typedef enum {MAC_PUSH, MAC_READ, MAC_CSR_RD, MAC_CSR_WR, MAC_RESET} mac_kind_e;
+    typedef enum {MAC_PUSH, MAC_READ, MAC_CSR_RD, MAC_CSR_WR, MAC_RESET, MAC_POP} mac_kind_e;
 
     class mac_cmd_item extends uvm_sequence_item;
         rand mac_kind_e      kind;
@@ -31,12 +35,13 @@ package mac_cmd_agent_pkg;
         rand int unsigned    gap;
 
         // results (driver) and observations (monitor)
-        bit [31:0]           rdata;          // READ: rd_data; CSR_RD: csr_rdata
+        logic [31:0]         rdata;          // READ: rd_data; CSR_RD: csr_rdata (4-state)
         bit                  drained;        // CSR_RD: rd_ready was 1 in that cycle (engine idle, FIFO empty)
+        bit                  cmd_ready;      // CSR_RD: cmd_ready in that cycle
         int unsigned         wait_cycles;    // PUSH: cycles with cmd_ready = 0; READ: cycles with rd_ready = 0
 
         constraint c_gap  { gap <= 20; }
-        constraint c_kind { kind != MAC_RESET; }
+        constraint c_kind { !(kind inside {MAC_RESET, MAC_POP}); }
 
         `uvm_object_utils(mac_cmd_item)
 
@@ -50,6 +55,7 @@ package mac_cmd_agent_pkg;
                 MAC_READ:   return $sformatf("READ idx=%0d data=%08x", idx, rdata);
                 MAC_CSR_RD: return $sformatf("CSR_RD 0x%03x = %08x%s", csr_addr, rdata, drained ? " (drained)" : "");
                 MAC_CSR_WR: return $sformatf("CSR_WR 0x%03x <- %08x", csr_addr, csr_wdata);
+                MAC_POP:    return "POP (CHECK)";
                 default:    return "RESET";
             endcase
         endfunction
@@ -185,10 +191,11 @@ package mac_cmd_agent_pkg;
                 in_reset = 1'b0;
                 if (vif.mon_cb.csr_re === 1'b1) begin
                     it = mac_cmd_item::type_id::create("csr_rd");
-                    it.kind     = MAC_CSR_RD;
-                    it.csr_addr = vif.mon_cb.csr_addr;
-                    it.rdata    = vif.mon_cb.csr_rdata;
-                    it.drained  = (vif.mon_cb.rd_ready === 1'b1);
+                    it.kind      = MAC_CSR_RD;
+                    it.csr_addr  = vif.mon_cb.csr_addr;
+                    it.rdata     = vif.mon_cb.csr_rdata;
+                    it.drained   = (vif.mon_cb.rd_ready === 1'b1);
+                    it.cmd_ready = (vif.mon_cb.cmd_ready === 1'b1);
                     publish(it);
                 end
                 if (vif.mon_cb.rd_req === 1'b1 && vif.mon_cb.rd_ready === 1'b1) begin
@@ -203,6 +210,11 @@ package mac_cmd_agent_pkg;
                     it.kind      = MAC_CSR_WR;
                     it.csr_addr  = vif.mon_cb.csr_addr;
                     it.csr_wdata = vif.mon_cb.csr_wdata;
+                    publish(it);
+                end
+                if (vif.mon_cb.eng_pop === 1'b1) begin
+                    it = mac_cmd_item::type_id::create("pop");
+                    it.kind = MAC_POP;
                     publish(it);
                 end
                 if (vif.mon_cb.cmd_valid === 1'b1 && vif.mon_cb.cmd_ready === 1'b1) begin

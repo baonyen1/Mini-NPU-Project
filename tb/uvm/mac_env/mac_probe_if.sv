@@ -2,7 +2,8 @@
 
 // mac_probe_if - white-box view of mac_engine state for coverage (spec 10.5 cg_fifo, cg_state). Bound
 // into mac_engine by mac_tb_top (bind), so it reads the engine's internal names directly; nothing here
-// drives the DUT. mac_coverage gets it through uvm_config_db as "probe_vif".
+// drives the DUT. mac_coverage gets it through uvm_config_db as "probe_vif"; mac_tb_top also derives
+// mac_cmd_if.eng_pop (state CHECK) from it, so the predictor applies each command when it is popped.
 interface mac_probe_if (
     input logic       clk,
     input logic       rst_n,

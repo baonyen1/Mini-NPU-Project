@@ -8,6 +8,11 @@
 // CSR read, to tell the monitor that this cycle's csr_rdata is an observed read. It is not connected
 // to the DUT.
 //
+// eng_pop is verification-only too: 1 in a cycle where the engine is in CHECK, i.e. pops the FIFO head
+// at the next edge. mac_tb_top drives it from the bound mac_probe_if. It is sampled by mon_cb with the
+// ports, so the monitor sees each pop in the same edge as the CSR traffic of that cycle, without a race
+// between two clocking blocks; the predictor applies each command to npu_ref at its pop (spec 6.3 rule 4).
+//
 // Timing: the driver drives 1 ns after a rising edge (drv_cb output #1); both clocking blocks sample
 // just before the edge (#1step), so the DUT and the testbench see the same values at every edge.
 interface mac_cmd_if (input logic clk);
@@ -29,6 +34,7 @@ interface mac_cmd_if (input logic clk);
     logic [31:0]           csr_wdata;
     logic [31:0]           csr_rdata;
     logic                  csr_re;        // verification only, see above
+    logic                  eng_pop;       // verification only, see above
 
     clocking drv_cb @(posedge clk);
         default input #1step output #1;
@@ -39,6 +45,6 @@ interface mac_cmd_if (input logic clk);
     clocking mon_cb @(posedge clk);
         default input #1step;
         input rst_n, cmd_valid, cmd_ready, cmd_op, cmd_addr, cmd_k, cmd_clr, rd_req, rd_idx, rd_ready, rd_data,
-              csr_we, csr_addr, csr_wdata, csr_rdata, csr_re;
+              csr_we, csr_addr, csr_wdata, csr_rdata, csr_re, eng_pop;
     endclocking
 endinterface

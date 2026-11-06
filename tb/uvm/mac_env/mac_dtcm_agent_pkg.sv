@@ -8,7 +8,10 @@
 //
 // Every write goes through write_word(), which also calls npu_ref_mem_write, so the golden model's DTCM
 // image always equals mem (Review Focus 2; mac_env's check_phase proves it over all 16,384 words).
-// Sequences must only write while the engine is drained (the WAR rule, spec 6.3 rule 5).
+// Sequences must only write while the engine is drained (the WAR rule, spec 6.3 rule 5): write_word
+// raises WAR_RULE unless rd_ready is 1 and no push is on the command port (cmd_valid 0) at that moment.
+// That is stricter than the rule, which only forbids words a queued or running LOAD reads, and it is
+// what the directed sequences promise (they write after drain()); mac_war_inject is its self-test.
 // corrupt_word() is the one deliberate exception: it changes mem without the model, so that the test
 // mac_mem_mirror_inject can show the mirror check is not vacuous.
 package mac_dtcm_agent_pkg;
@@ -23,6 +26,7 @@ package mac_dtcm_agent_pkg;
         `uvm_component_utils(mac_dtcm_agent)
 
         virtual mac_dtcm_if vif;
+        virtual mac_cmd_if  cmd_vif;           // rd_ready and cmd_valid, for the WAR check
         bit [PORT_B_W-1:0]  mem [DTCM_QUADS];
         int unsigned        n_reads;           // port-B reads answered since the start
 
@@ -34,6 +38,8 @@ package mac_dtcm_agent_pkg;
             super.build_phase(phase);
             if (!uvm_config_db #(virtual mac_dtcm_if)::get(this, "", "dtcm_vif", vif))
                 `uvm_fatal("NOVIF", "mac_dtcm_agent: no dtcm_vif in uvm_config_db")
+            if (!uvm_config_db #(virtual mac_cmd_if)::get(this, "", "cmd_vif", cmd_vif))
+                `uvm_fatal("NOVIF", "mac_dtcm_agent: no cmd_vif in uvm_config_db")
         endfunction
 
         // word_idx = (byte address - DTCM_BASE) / 4
@@ -42,6 +48,12 @@ package mac_dtcm_agent_pkg;
                 `uvm_error("DTCM", $sformatf("write_word: word %0d out of range", word_idx))
                 return;
             end
+            // Right after a push the sequence may run before or after this edge's register updates, so
+            // rd_ready may not show the new command yet; cmd_valid is still 1 then (it drops 1 ns after
+            // the edge). Either one flags the write.
+            if (cmd_vif.rd_ready !== 1'b1 || cmd_vif.cmd_valid === 1'b1)
+                `uvm_error("WAR_RULE", $sformatf({"write_word %0d while the engine is not drained (rd_ready %b, ",
+                           "cmd_valid %b): spec 6.3 rule 5"}, word_idx, cmd_vif.rd_ready, cmd_vif.cmd_valid))
             mem[word_idx / 4][32 * (word_idx % 4) +: 32] = data;
             npu_ref_mem_write(word_idx, data);
         endfunction

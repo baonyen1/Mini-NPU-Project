@@ -26,9 +26,17 @@ tests:
   mac_fifo_full:               {env: mac}
   mac_read_while_busy:         {env: mac}
   mac_w1c:                     {env: mac}
+  # W1C while an erroneous command is still queued (the predictor applies commands at CHECK)
+  mac_w1c_inflight:            {env: mac}
+  # D23: error-bit set wins over a W1C in the same cycle
+  mac_d23:                     {env: mac}
+  # D17: npu_busy_cyc counts busy cycles; a write in a busy cycle wins
+  mac_busy_cyc:                {env: mac}
   mac_mem_mirror_check:        {env: mac}
   # self-test of the end-of-test mirror check (Review Focus 2)
   mac_mem_mirror_inject:       {env: mac, expect: fail, expect_ids: [MEM_MIRROR]}
+  # self-test of the WAR check (spec 6.3 rule 5): a DTCM write while a LOAD is queued
+  mac_war_inject:              {env: mac, expect: fail, expect_ids: [WAR_RULE]}
   # Review Focus 4: a COMPUTE that reads unwritten buffer entries is a test error
   mac_unwritten_entry_flagged: {env: mac, expect: fail, expect_ids: [UNWRITTEN_ENTRY]}
 
@@ -48,6 +56,10 @@ suites:
     - mac_fifo_full
     - mac_read_while_busy
     - mac_w1c
+    - mac_w1c_inflight
+    - mac_d23
+    - mac_busy_cyc
     - mac_mem_mirror_check
     - mac_mem_mirror_inject
+    - mac_war_inject
     - mac_unwritten_entry_flagged

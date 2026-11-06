@@ -20,7 +20,8 @@ module mac_engine_sva
     input logic                                  b_req,
     input logic [QUAD_ADDR_W-1:0]                b_addr,
     input logic                                  buf_we,         // WBUF/IBUF write strobe (wr_pend_q)
-    input logic [31:0]                           head_k          // K of the FIFO head (the command in CHECK)
+    input logic [31:0]                           head_k,         // K of the FIFO head (the command in CHECK)
+    input logic [31:0]                           head_addr       // address of the FIFO head
 );
     import uvm_pkg::*;
     `include "uvm_macros.svh"
@@ -50,6 +51,26 @@ module mac_engine_sva
     a_mac3_addr: assert property (b_req |-> b_addr <= DTCM_QUADS - 1)
         else `uvm_error("A-MAC-3", $sformatf("b_addr %0d outside the DTCM", b_addr))
     c_mac3: cover property (b_req);
+
+    // A-MAC-3, which quads: the n-th b_req after a CHECK reads quad (addr - DTCM_BASE)/16 + n of that
+    // command (spec 6.2, 6.3), so the first read starts at the command's address and the reads are
+    // consecutive. exp_qaddr_q is loaded in every CHECK (a dropped command issues no b_req before the
+    // next CHECK) and advances by one per b_req. The 12-bit check above alone holds for any b_addr.
+    logic [QUAD_ADDR_W-1:0] exp_qaddr_q;
+    logic [31:0]            head_off;
+    assign head_off = head_addr - DTCM_BASE;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n)                 exp_qaddr_q <= '0;
+        else if (state == S_CHECK)  exp_qaddr_q <= head_off[$clog2(QUAD_BYTES) +: QUAD_ADDR_W];
+        else if (b_req)             exp_qaddr_q <= exp_qaddr_q + 1'b1;
+    end
+
+    // the action block runs after this edge's updates: print the sampled values the property used
+    a_mac3_quad: assert property (b_req |-> b_addr == exp_qaddr_q)
+        else `uvm_error("A-MAC-3", $sformatf("b_addr %0d, expected quad %0d (the command's address + reads so far)",
+                                             $sampled(b_addr), $sampled(exp_qaddr_q)))
+    c_mac3_burst: cover property (b_req ##1 b_req);
 
     // A-MAC-4: buffers are written only in LOAD
     a_mac4: assert property (buf_we |-> state == S_LOAD)
