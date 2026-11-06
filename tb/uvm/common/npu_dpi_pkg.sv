@@ -9,6 +9,7 @@ package npu_dpi_pkg;
 
   import "DPI-C" function void         npu_ref_reset();
   import "DPI-C" function void         npu_ref_mem_write(input int unsigned word_idx, input int unsigned data);
+  import "DPI-C" function int unsigned npu_ref_mem_read(input int unsigned word_idx);
   import "DPI-C" function void         npu_ref_cmd(input int unsigned op, input int unsigned addr,
                                                    input int unsigned k, input int unsigned clr);
   import "DPI-C" function int unsigned npu_ref_read(input int unsigned idx);

@@ -115,7 +115,7 @@
 - Create: `tb/uvm/common/npu_cosim_checker.sv` (subscriber: on each `npu_rvvi_item`, call `iss_step(&rec)` and compare)
 - Create: `tb/uvm/common/npu_sim_ctrl_if.sv`, `npu_sim_ctrl_monitor` (ends the test on PASS/FAIL; raises `UVM_FATAL` on timeout)
 - Create: `tb/uvm/common/npu_base_test.sv` (backdoor load from plusargs, objection until `sim_ctrl` end or timeout)
-- Create **[support]**: `run.py`, `sim/tests.yaml` (test → env, firmware, expected result `pass|fail`, seeds), `manifest.yaml` writer
+- Create **[support]**: `run.py`, `sim/tests.yaml` (test → env, firmware, expected result `pass|fail`, seeds), `manifest.yaml` writer *(done 2026-11-07 for QuestaSim, with Task 16: per-build `modelsim.ini` mapping UVM 1.2, expected-fail tests judged by their error IDs; `run_py_selftest` and `--simulator xsim` are open)*
 - Modify (Tấn): `model/c/rv_iss.{h,c}`: add `uint32_t iss_mem_read(uint32_t addr);` (needed by Task 18 end-of-test check)
 
 **Interfaces:**
@@ -141,6 +141,7 @@
 **Files:**
 - Create: `tb/uvm/mac_env/mac_cmd_if.sv`, `mac_dtcm_if.sv`, `mac_cmd_agent_pkg.sv`, `mac_dtcm_agent_pkg.sv`, `mac_predictor.sv`, `mac_scoreboard.sv`, `mac_coverage.sv`, `mac_env_pkg.sv`, `mac_seq_lib.sv`, `mac_test_pkg.sv`, `mac_tb_top.sv`, `mac_dv.f`
 - Create: `tb/sva/mac_engine_sva.sv` (A-MAC-1..5, `bind mac_engine`)
+- Create (added 2026-11-07): `tb/uvm/mac_env/mac_probe_if.sv` (white-box FSM state and FIFO count, bound into `mac_engine`, for `cg_fifo` and `cg_state`)
 - Modify: `model/c/npu_ref.{h,c}`: add `uint32_t npu_ref_mem_read(uint32_t word_idx);` and a unit test for it
 
 **Interfaces:**
@@ -151,14 +152,15 @@
   - `mac_predictor` → `mac_scoreboard`: compares each READ result and each `npu_status` read with `npu_ref`; raises `UVM_ERROR "UNWRITTEN_ENTRY"` when a COMPUTE's K/4 exceeds the entries written since reset (§7.2)
   - Covergroups exactly as §10.5: `cg_cmd`, `cg_operand`, `cg_fifo`, `cg_state`, `cg_acc`, `cg_err`, `cg_addr` (`cg_gate` is added in Phase 3)
 
-- [ ] **Step 1 (weeks 5–6): Write the failing directed tests** (one `uvm_test` each, every §10.3 mac row):
+- [x] **Step 1 (weeks 5–6): Write the failing directed tests** (one `uvm_test` each, every §10.3 mac row):
   - `mac_single_k4` (hand data), `mac_k_kmax`, `mac_k0`, `mac_k_too_big` (1028), `mac_k_mod4` (6), `mac_misaligned` (`a[3:0]=4`), `mac_addr_oob`, `mac_addr_wraps_32bit` (`0xFFFF_FFF0`, K=8), `mac_illegal`
   - `mac_clr_vs_accum`, `mac_forced_wrap` (repeat COMPUTE clr=0 with all lanes −128 until `acc` wraps; expected value from `npu_ref`)
   - `mac_fifo_full` (8 back-to-back pushes + 1 more while busy; `cmd_ready` low observed), `mac_read_while_busy` (`rd_ready` low until drained), `mac_w1c`
   - `mac_mem_mirror_check` (Review Focus 2): every test's `report_phase` compares a hash of the responder memory with `npu_ref_mem_read` over all 16,384 words
   - `mac_unwritten_entry_flagged` (Review Focus 4, expected-fail): COMPUTE K=8 after reset with only one quad loaded → `UVM_ERROR UNWRITTEN_ENTRY`
-- [ ] **Step 2:** `run.py --target mac_directed` → FAIL. **Step 3:** Implement env, agents, predictor, scoreboard, SVA. **Step 4:** All pass; expected-fail test fails for the stated reason only.
-- [ ] **Step 5: Commit** `feat(tb): mac_env directed`.
+- [x] **Step 2:** `run.py --target mac_directed` → FAIL. **Step 3:** Implement env, agents, predictor, scoreboard, SVA. **Step 4:** All pass; expected-fail test fails for the stated reason only.
+- [x] **Step 5: Commit** `feat(tb): mac_env directed`.
+  *Done 2026-11-07 (Step 1-5, written by Claude at Bảo's request). `python run.py --target mac_directed`: 17/17 runs as expected in D0 and in D1 (`RESULT: PASS`): 15 tests PASS with `UVM_ERROR : 0`, `UVM_FATAL : 0`; `mac_unwritten_entry_flagged` fails with `UNWRITTEN_ENTRY` only and `mac_mem_mirror_inject` (added: a self-test of the mirror check) with `MEM_MIRROR` only. The first runs failed on testbench bugs (a driver race that lost the first command, a timeout in the wrong time unit, a missing W1C in a test), not on the DUT. Seven RTL mutants run through the env each raise the matching ID (MISMATCH, ERRBITS, A-MAC-1, -2, -3, -4, -5); one of them, clr applied on every step, first slipped through `mac_clr_vs_accum` (K = 4 has one step), which now also runs a K = 16 COMPUTE with clr. The runs use UVM 1.2 (`run.py` maps it; QuestaSim's default is 1.1d). The §10.5 covergroups are declared and sampled (except `cg_gate`, Phase 3); closure is Step 7 and Task 19.*
 - [ ] **Step 6 (weeks 7–9): Write `mac_rand_seq`** (§10.3): op mix weights LDW 30 / LDI 30 / MAC 30 / ILLEGAL 2 / READ 8; K bins as `cg_cmd` with 5 % illegal K; addresses 90 % in range and aligned; operand lanes biased 20 % to {−128, −1, 0, 1, 127}; inter-command gap 0–20 cycles. Constraint: no COMPUTE beyond written entries (§7.2). Test `mac_rand` with ≥ 200 seeds.
 - [ ] **Step 7:** `run.py --target mac_rand --seeds 200 --cov` → 0 mismatches, 0 SVA failures; covergroups declared in full by end of week 7 (closure is Task 19).
 - [ ] **Step 8: Commit** `feat(tb): mac_env random and coverage`.

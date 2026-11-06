@@ -29,6 +29,7 @@ enum { NPU_OP_LDW = 0, NPU_OP_LDI = 1, NPU_OP_MAC = 2, NPU_OP_ILLEGAL = 3 };
 
 void     npu_ref_reset(void);
 void     npu_ref_mem_write(uint32_t word_idx, uint32_t data);  /* word_idx 0..16383 */
+uint32_t npu_ref_mem_read(uint32_t word_idx);                  /* word_idx 0..16383; Phase 2 Task 16 */
 void     npu_ref_cmd(uint32_t op, uint32_t addr, uint32_t k, uint32_t clr);
 uint32_t npu_ref_read(uint32_t idx);                           /* uses idx & 0xF */
 uint32_t npu_ref_status(void);

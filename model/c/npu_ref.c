@@ -86,6 +86,18 @@ void npu_ref_mem_write(uint32_t word_idx, uint32_t data)
     dtcm[word_idx] = data;
 }
 
+/* The model's DTCM image, for the testbench to check that it never diverges from the
+ * memory the DUT reads (Phase 2 Review Focus 2). */
+uint32_t npu_ref_mem_read(uint32_t word_idx)
+{
+    if (word_idx >= NPU_DTCM_WORDS) {
+        fprintf(stderr, "npu_ref_mem_read: word_idx %u out of range (max %u)\n",
+                (unsigned)word_idx, (unsigned)(NPU_DTCM_WORDS - 1u));
+        abort();
+    }
+    return dtcm[word_idx];
+}
+
 uint32_t npu_ref_read(uint32_t idx)
 {
     uint32_t masked = idx & 0xFu;           /* spec 6.3: only idx[3:0] is used */

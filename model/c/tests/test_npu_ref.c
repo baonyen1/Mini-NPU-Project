@@ -432,6 +432,24 @@ static void test_csr_read(void)
     CHECK_EQ(npu_ref_csr_read(NPU_CSR_BUSY_CYC), 0);     /* reset clears busy_cyc */
 }
 
+/* npu_ref_mem_read (Phase 2 Task 16): reads back exactly what npu_ref_mem_write stored, word by
+ * word, including the first and the last word; reset clears the image. mac_env uses it to prove
+ * that the responder memory and the model's DTCM never diverge (Review Focus 2). */
+static void test_mem_read(void)
+{
+    npu_ref_reset();
+    CHECK_EQ(npu_ref_mem_read(0), 0);
+    CHECK_EQ(npu_ref_mem_read(NPU_DTCM_WORDS - 1u), 0);
+    for (uint32_t w = 0; w < NPU_DTCM_WORDS; w += 97u) npu_ref_mem_write(w, 0xA5000000u ^ (w * 2654435761u));
+    npu_ref_mem_write(NPU_DTCM_WORDS - 1u, 0xCAFEF00Du);
+    for (uint32_t w = 0; w < NPU_DTCM_WORDS; w += 97u) CHECK_EQ(npu_ref_mem_read(w), 0xA5000000u ^ (w * 2654435761u));
+    CHECK_EQ(npu_ref_mem_read(1), 0);                      /* untouched words stay 0 */
+    CHECK_EQ(npu_ref_mem_read(NPU_DTCM_WORDS - 1u), 0xCAFEF00Du);
+    npu_ref_reset();
+    CHECK_EQ(npu_ref_mem_read(97), 0);
+    CHECK_EQ(npu_ref_mem_read(NPU_DTCM_WORDS - 1u), 0);
+}
+
 int main(void)
 {
     printf("npu_ref unit tests\n");
@@ -458,6 +476,7 @@ int main(void)
     RUN(test_stale_quads_survive_short_load);
     RUN(test_csr_read);
     RUN(test_w1c);
+    RUN(test_mem_read);
     printf("npu_ref: all tests passed\n");
     return 0;
 }
