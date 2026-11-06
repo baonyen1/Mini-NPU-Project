@@ -95,6 +95,7 @@ package mac_test_pkg;
     `MAC_TEST(mac_w1c_inflight,            mac_w1c_inflight_seq)
     `MAC_TEST(mac_d23,                     mac_d23_seq)
     `MAC_TEST(mac_busy_cyc,                mac_busy_cyc_seq)
+    `MAC_TEST(mac_addr_cov_dropped,        mac_addr_cov_dropped_seq)
     `MAC_TEST(mac_mem_mirror_check,        mac_mem_mirror_check_seq)
     `MAC_TEST(mac_mem_mirror_inject,       mac_mem_mirror_inject_seq)
     `MAC_TEST(mac_war_inject,              mac_war_inject_seq)

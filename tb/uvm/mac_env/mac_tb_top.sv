@@ -63,8 +63,9 @@ module mac_tb_top;
         .head_addr    (head.addr)
     );
 
-    // the pop marker of mac_cmd_if (state CHECK = 1, see mac_probe_if)
-    assign cmd_if.eng_pop = (dut.u_probe.state == 2'd1);
+    // the pop marker of mac_cmd_if: the engine pops the FIFO head in CHECK (see mac_probe_if)
+    localparam logic [1:0] FSM_CHECK = 2'd1;               // mac_engine state_e encoding of CHECK
+    assign cmd_if.eng_pop = (dut.u_probe.state == FSM_CHECK);
 
     bind mac_engine mac_probe_if u_probe (
         .clk        (clk),

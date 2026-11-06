@@ -575,6 +575,26 @@ class mac_busy_cyc_seq extends mac_base_seq;
     endtask
 endclass
 
+// Self-check of cg_addr (review finding F9a): first_quad counts only a LOAD that executes from DTCM_BASE.
+// A LOAD at DTCM_BASE that CHECK drops (K = 6, err_k) must leave the bin empty; a legal one must fill it.
+// cp_first has the single bin first_quad, so its coverage is 0 or 100.
+class mac_addr_cov_dropped_seq extends mac_base_seq;
+    `uvm_object_utils(mac_addr_cov_dropped_seq)
+    function new(string name = "mac_addr_cov_dropped_seq"); super.new(name); endfunction
+    task body();
+        real c;
+        hand_setup();
+        push(OP_LDW, DTCM_BASE, 6);
+        expect_errs("LDW at DTCM_BASE, K = 6", 32'd1 << ST_ERR_K);
+        c = env.coverage.cg_addr.cp_first.get_coverage();
+        if (c != 0.0) `uvm_error("COV_ADDR", $sformatf("dropped LOAD at DTCM_BASE hit first_quad (cp_first %0.1f%%)", c))
+        push(OP_LDW, DTCM_BASE, 4);
+        drain();
+        c = env.coverage.cg_addr.cp_first.get_coverage();
+        if (c != 100.0) `uvm_error("COV_ADDR", $sformatf("legal LOAD at DTCM_BASE missed first_quad (cp_first %0.1f%%)", c))
+    endtask
+endclass
+
 // Review Focus 2: a DTCM-wide workload; the mirror check itself runs in mac_env.check_phase of every test.
 class mac_mem_mirror_check_seq extends mac_base_seq;
     `uvm_object_utils(mac_mem_mirror_check_seq)

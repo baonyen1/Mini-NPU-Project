@@ -120,6 +120,9 @@ class mac_predictor extends uvm_subscriber #(mac_cmd_item);
     // npu_status RO bits (spec 6.4) against what the testbench sees in the same cycle: cmd_ready is
     // !fifo_full and rd_ready is !busy && fifo_empty (spec 7.1), and `pending` holds as many commands as
     // the FIFO (pushes and pops of earlier edges only: the read is processed before this edge's).
+    // The queue-depth checks rely on this RTL popping the FIFO head at the edge that ends CHECK (one
+    // CHECK cycle per command, docs/mac_engine.md); spec 6.4 does not fix when the pop happens, so an
+    // engine that pops later would need a different count here.
     function void check_status_ro(mac_cmd_item t);
         int unsigned n = pending.size();
         send("npu_status.fifo_full vs !cmd_ready", 32'(!t.cmd_ready), 32'(t.rdata[ST_FIFO_FULL]),
