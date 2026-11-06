@@ -1,0 +1,53 @@
+# Test list for run.py (Phase 2 Task 15 [support]). Every simulation runs through run.py (SC6 later needs
+# no new plumbing).
+#
+#   envs:    how to build and start an environment (compile list, top module, DPI-C sources)
+#   tests:   env, expected result (pass | fail, default pass) and, for an expected-fail test, the only
+#            UVM_ERROR / UVM_FATAL IDs it may report (each must appear at least once)
+#   suites:  named lists of tests for --target
+envs:
+  mac:
+    filelist: tb/uvm/mac_env/mac_dv.f
+    top: mac_tb_top
+    dpi: [model/c/npu_ref.c]
+
+tests:
+  mac_single_k4:               {env: mac}
+  mac_k_kmax:                  {env: mac}
+  mac_k0:                      {env: mac}
+  mac_k_too_big:               {env: mac}
+  mac_k_mod4:                  {env: mac}
+  mac_misaligned:              {env: mac}
+  mac_addr_oob:                {env: mac}
+  mac_addr_wraps_32bit:        {env: mac}
+  mac_illegal:                 {env: mac}
+  mac_clr_vs_accum:            {env: mac}
+  mac_forced_wrap:             {env: mac}
+  mac_fifo_full:               {env: mac}
+  mac_read_while_busy:         {env: mac}
+  mac_w1c:                     {env: mac}
+  mac_mem_mirror_check:        {env: mac}
+  # self-test of the end-of-test mirror check (Review Focus 2)
+  mac_mem_mirror_inject:       {env: mac, expect: fail, expect_ids: [MEM_MIRROR]}
+  # Review Focus 4: a COMPUTE that reads unwritten buffer entries is a test error
+  mac_unwritten_entry_flagged: {env: mac, expect: fail, expect_ids: [UNWRITTEN_ENTRY]}
+
+suites:
+  mac_directed:
+    - mac_single_k4
+    - mac_k_kmax
+    - mac_k0
+    - mac_k_too_big
+    - mac_k_mod4
+    - mac_misaligned
+    - mac_addr_oob
+    - mac_addr_wraps_32bit
+    - mac_illegal
+    - mac_clr_vs_accum
+    - mac_forced_wrap
+    - mac_fifo_full
+    - mac_read_while_busy
+    - mac_w1c
+    - mac_mem_mirror_check
+    - mac_mem_mirror_inject
+    - mac_unwritten_entry_flagged
