@@ -17,21 +17,23 @@ class mac_coverage extends uvm_component;
     virtual mac_cmd_if   cmd_vif;
     virtual mac_probe_if probe_vif;
 
-    // op x K bins x K mod 4; MAC x clr x accumulator non-zero before the command
+    // op x K bins x K mod 4; MAC x clr x accumulator non-zero before the command.
+    // The K bins are contiguous, so every K falls in exactly one (spec 10.5, D24).
     covergroup cg_cmd with function sample(npu_op_e op, bit [31:0] k, bit clr, bit acc_nz);
         cp_op: coverpoint op;
         cp_k: coverpoint k {
             bins k0        = {0};
-            bins k4        = {4};
-            bins k8_60     = {[8:60]};
-            bins k64_kmax4 = {[64:KMAX - 4]};
+            bins k1_7      = {[1:7]};
+            bins k8_63     = {[8:63]};
+            bins k64_kmax1 = {[64:KMAX - 1]};
             bins kmax      = {KMAX};
             bins over_kmax = {[KMAX + 1:32'hFFFF_FFFF]};
         }
         cp_kmod4: coverpoint k[1:0];
         x_op_k_mod: cross cp_op, cp_k, cp_kmod4 {
-            // K = 0, 4 and KMAX are multiples of 4: those crosses cannot occur
-            ignore_bins fixed = (binsof(cp_k.k0) || binsof(cp_k.k4) || binsof(cp_k.kmax)) &&
+            // K = 0 and K = KMAX are multiples of 4: those crosses cannot occur. The cell k1_7 x (K mod 4 = 0)
+            // is exactly K = 4, so the one-step case keeps a cross cell of its own.
+            ignore_bins fixed = (binsof(cp_k.k0) || binsof(cp_k.kmax)) &&
                                 binsof(cp_kmod4) intersect {[1:3]};
         }
         cp_mac_clr: coverpoint clr iff (op == OP_MAC);
