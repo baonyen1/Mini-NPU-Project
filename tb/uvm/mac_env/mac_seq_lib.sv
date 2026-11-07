@@ -678,7 +678,9 @@ endclass
 //   READ     random idx; 25 % of them are followed by all 16 results and npu_status (check_all), and
 //            30 % by a rewrite of a DTCM block (see mac_rand_seq)
 //   CSR      reads: 0x7C0 70, 0x7C1 15, any other address 15 (reads 0, D21); writes: 0x7C0 80 (W1C
-//            of random bits, or of all four error bits in 25 % of them), 0x7C1 10, other 10 (ignored)
+//            of random bits, or of all four error bits in 25 % of them), 0x7C1 10, other 10 (ignored).
+//            50 % of the writes to 0x7C0 are followed by a gap-0 read of 0x7C0: without that read a
+//            later set of the same sticky bit hides a wrong W1C result (D23, a W1C in flight)
 typedef enum {RND_LDW, RND_LDI, RND_MAC, RND_ILLEGAL, RND_READ, RND_CSR_RD, RND_CSR_WR} mac_rand_kind_e;
 typedef enum {RK_0, RK_1_7, RK_8_63, RK_64_KMAX1, RK_KMAX, RK_OVER} mac_rand_kbin_e;
 typedef enum {RA_IN, RA_FIRST, RA_LAST, RA_MISALIGNED, RA_BELOW, RA_PAST, RA_ONE_PAST, RA_TOP} mac_rand_acls_e;
@@ -702,6 +704,7 @@ class mac_rand_cmd extends uvm_object;
     rand bit [11:0]      csr_addr;
     rand bit             w1c_all;       // CSR write to npu_status: all four error bits
     rand bit [31:0]      csr_wdata;
+    rand bit             rd_after_w1c;  // CSR write to npu_status: read npu_status right after it
 
     int unsigned max_steps;             // input: min(WBUF, IBUF) entries written since reset
 
@@ -766,6 +769,7 @@ class mac_rand_cmd extends uvm_object;
                            [0:CSR_NPU_STATUS - 1] :/ 8, [CSR_NPU_BUSY_CYC + 1:12'hFFF] :/ 7};
         w1c_all dist {1 := 25, 0 := 75};
         (csr_addr == CSR_NPU_STATUS && w1c_all) -> (csr_wdata == ST_ERR_MASK);
+        rd_after_w1c dist {1 := 50, 0 := 50};
     }
 
     function new(string name = "mac_rand_cmd");
@@ -798,7 +802,7 @@ class mac_rand_seq extends mac_base_seq;
     int unsigned n_kind  [RND_CSR_WR + 1];      // draws per enum value, indexed by the enum
     int unsigned n_kbin  [RK_OVER + 1];
     int unsigned n_acls  [RA_TOP + 1];
-    int unsigned n_k_bad, n_push, n_refresh;
+    int unsigned n_k_bad, n_push, n_refresh, n_rd_w1c;
     bit [31:0]   sig = 32'h811C_9DC5;           // FNV-1a over the stimulus stream
 
     localparam bit [7:0] CORNERS [5] = '{8'h80, 8'hFF, 8'h00, 8'h01, 8'h7F};
@@ -878,17 +882,25 @@ class mac_rand_seq extends mac_base_seq;
                 default: begin                                  // RND_CSR_WR
                     note(c.csr_addr); note(c.csr_wdata);
                     csr_wr(c.csr_addr, c.csr_wdata, c.gap);
+                    if (c.csr_addr == CSR_NPU_STATUS) begin
+                        note(c.rd_after_w1c);
+                        if (c.rd_after_w1c) begin               // in the next cycle: the W1C result
+                            csr_rd(CSR_NPU_STATUS, d, 0);       // before another set can hide it
+                            n_rd_w1c++;
+                        end
+                    end
                 end
             endcase
         end
         drain();
         `uvm_info("MAC_RAND", $sformatf({"%0d steps: LDW %0d, LDI %0d, MAC %0d, ILLEGAL %0d, READ %0d, CSR_RD %0d, ",
-                  "CSR_WR %0d; %0d pushes, illegal K %0d (%0.1f%%); K bins 0:%0d 1-7:%0d 8-63:%0d 64-KMAX-1:%0d ",
+                  "CSR_WR %0d (%0d npu_status reads right after a W1C); %0d pushes, illegal K %0d (%0.1f%%); ",
+                  "K bins 0:%0d 1-7:%0d 8-63:%0d 64-KMAX-1:%0d ",
                   "KMAX:%0d >KMAX:%0d; LOAD address in/first/last %0d/%0d/%0d, misaligned %0d, below %0d, ",
                   "past %0d, one past %0d, top %0d; %0d DTCM blocks rewritten; entries written WBUF %0d IBUF %0d; ",
                   "stimulus signature %08x"},
                   n_items, n_kind[RND_LDW], n_kind[RND_LDI], n_kind[RND_MAC], n_kind[RND_ILLEGAL],
-                  n_kind[RND_READ], n_kind[RND_CSR_RD], n_kind[RND_CSR_WR], n_push, n_k_bad,
+                  n_kind[RND_READ], n_kind[RND_CSR_RD], n_kind[RND_CSR_WR], n_rd_w1c, n_push, n_k_bad,
                   (n_push == 0) ? 0.0 : 100.0 * n_k_bad / n_push,
                   n_kbin[RK_0], n_kbin[RK_1_7], n_kbin[RK_8_63], n_kbin[RK_64_KMAX1], n_kbin[RK_KMAX], n_kbin[RK_OVER],
                   n_acls[RA_IN], n_acls[RA_FIRST], n_acls[RA_LAST], n_acls[RA_MISALIGNED], n_acls[RA_BELOW],
