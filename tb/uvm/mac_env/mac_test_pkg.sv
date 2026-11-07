@@ -100,6 +100,7 @@ package mac_test_pkg;
     `MAC_TEST(mac_mem_mirror_inject,       mac_mem_mirror_inject_seq)
     `MAC_TEST(mac_war_inject,              mac_war_inject_seq)
     `MAC_TEST(mac_unwritten_entry_flagged, mac_unwritten_entry_flagged_seq)
+    `MAC_TEST(mac_rand,                    mac_rand_seq)
 
     `undef MAC_TEST
 endpackage : mac_test_pkg

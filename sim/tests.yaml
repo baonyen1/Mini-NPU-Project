@@ -41,6 +41,8 @@ tests:
   mac_war_inject:              {env: mac, expect: fail, expect_ids: [WAR_RULE]}
   # Review Focus 4: a COMPUTE that reads unwritten buffer entries is a test error
   mac_unwritten_entry_flagged: {env: mac, expect: fail, expect_ids: [UNWRITTEN_ENTRY]}
+  # Step 6: mac_rand_seq, random op mix (spec 10.3); run with --seeds N (plan: >= 200)
+  mac_rand:                    {env: mac}
 
 suites:
   mac_directed:
@@ -66,3 +68,5 @@ suites:
     - mac_mem_mirror_inject
     - mac_war_inject
     - mac_unwritten_entry_flagged
+  mac_rand:
+    - mac_rand

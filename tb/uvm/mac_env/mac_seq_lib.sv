@@ -1,5 +1,5 @@
-// mac_seq_lib.sv - sequences of mac_env (Phase 2 Task 16, Step 1: the directed tests of spec 10.3).
-// Included by mac_test_pkg.
+// mac_seq_lib.sv - sequences of mac_env (Phase 2 Task 16: Step 1, the directed tests of spec 10.3;
+// Step 6, mac_rand_seq at the end of the file). Included by mac_test_pkg.
 //
 // mac_base_seq holds the helpers. Every READ_RESULT and every npu_status read it issues is also compared
 // with npu_ref by the scoreboard; the explicit expectations below (hand-computed values, error bits,
@@ -34,10 +34,10 @@ class mac_base_seq extends uvm_sequence #(mac_cmd_item);
         last_wait = it.wait_cycles;
     endtask
 
-    task read(bit [3:0] idx, output bit [31:0] data);
+    task read(bit [3:0] idx, output bit [31:0] data, input int unsigned gap = 0);
         mac_cmd_item it = mac_cmd_item::type_id::create("read");
         start_item(it);
-        it.kind = MAC_READ; it.idx = idx; it.gap = 0;
+        it.kind = MAC_READ; it.idx = idx; it.gap = gap;
         finish_item(it);
         data      = it.rdata;
         last_wait = it.wait_cycles;
@@ -51,10 +51,10 @@ class mac_base_seq extends uvm_sequence #(mac_cmd_item);
         data = it.rdata;
     endtask
 
-    task csr_wr(bit [11:0] a, bit [31:0] d);
+    task csr_wr(bit [11:0] a, bit [31:0] d, int unsigned gap = 0);
         mac_cmd_item it = mac_cmd_item::type_id::create("csr_wr");
         start_item(it);
-        it.kind = MAC_CSR_WR; it.csr_addr = a; it.csr_wdata = d; it.gap = 0;
+        it.kind = MAC_CSR_WR; it.csr_addr = a; it.csr_wdata = d; it.gap = gap;
         finish_item(it);
     endtask
 
@@ -651,5 +651,248 @@ class mac_unwritten_entry_flagged_seq extends mac_base_seq;
         push(OP_LDI, I0, 4);
         push(OP_MAC, 0, 8, 1'b1);
         drain();
+    endtask
+endclass
+
+// ==== Step 6: random stimulus (spec 10.3 mac_rand_seq) ===============================================
+//
+// mac_rand_cmd is one random step of mac_rand_seq: a command push, a READ_RESULT or a CSR access. All of
+// its choices are SystemVerilog constraints solved by randomize(), and the operand data come from
+// $urandom, so -sv_seed alone reproduces a run (run.py --seeds N passes -sv_seed 1..N).
+//
+//   kind     LDW 30 / LDI 30 / MAC 30 / ILLEGAL 2 / READ 8 (spec 10.3, plan Task 16 Step 6), plus CSR
+//            reads 3 and CSR writes 2 on top, so a W1C in flight and D23 get random coverage too; the
+//            ratios between the five command kinds are those of the plan
+//   K        k_ok 95 % (legal: 0 or a multiple of 4 up to KMAX), 5 % illegal; then a bin of cg_cmd
+//            (spec 10.5, D24): legal K: {0} 5, [1:7] (that is K = 4) 15, [8:63] 30, [64:KMAX-1] 35,
+//            {KMAX} 15; illegal K: [1:7], [8:63], [64:KMAX-1] (not a multiple of 4) and > KMAX, 1 each.
+//            The same K mix is used for every op, ILLEGAL included (D16: it ignores K).
+//   COMPUTE  K/4 never exceeds the entries written since reset in both WBUF and IBUF (spec 7.2): the
+//            sequence passes that count in as max_steps. The predictor's UNWRITTEN_ENTRY check stays
+//            as the safety net; a random run that raises it is a sequence bug.
+//   address  LOADs: 90 % aligned and in range (70 anywhere, 10 at the first quad, 10 ending exactly at
+//            the end of the DTCM), 10 % not (4 misaligned, 2 below DTCM_BASE, 2 past the end, 1 one
+//            quad past the end, 1 at the top of the 32-bit space). COMPUTE and ILLEGAL ignore the
+//            address (spec 6.3), so it is any 32-bit value.
+//   gap      0..20 idle cycles before the step: 0 40 %, 1..3 30 %, 4..20 30 %
+//   READ     random idx; 25 % of them are followed by all 16 results and npu_status (check_all), and
+//            30 % by a rewrite of a DTCM block (see mac_rand_seq)
+//   CSR      reads: 0x7C0 70, 0x7C1 15, any other address 15 (reads 0, D21); writes: 0x7C0 80 (W1C
+//            of random bits, or of all four error bits in 25 % of them), 0x7C1 10, other 10 (ignored)
+typedef enum {RND_LDW, RND_LDI, RND_MAC, RND_ILLEGAL, RND_READ, RND_CSR_RD, RND_CSR_WR} mac_rand_kind_e;
+typedef enum {RK_0, RK_1_7, RK_8_63, RK_64_KMAX1, RK_KMAX, RK_OVER} mac_rand_kbin_e;
+typedef enum {RA_IN, RA_FIRST, RA_LAST, RA_MISALIGNED, RA_BELOW, RA_PAST, RA_ONE_PAST, RA_TOP} mac_rand_acls_e;
+
+class mac_rand_cmd extends uvm_object;
+    `uvm_object_utils(mac_rand_cmd)
+
+    localparam bit [31:0] DTCM_END = DTCM_BASE + DTCM_BYTES;    // one past the last byte
+
+    rand mac_rand_kind_e kind;
+    rand bit             k_ok;          // K is legal: 0, or a multiple of 4 up to KMAX
+    rand mac_rand_kbin_e k_bin;
+    rand bit [31:0]      k;
+    rand mac_rand_acls_e a_cls;
+    rand bit [31:0]      addr;
+    rand bit             clr;
+    rand int unsigned    gap;
+    rand bit [3:0]       idx;
+    rand bit             read_all;      // READ: check_all() after it
+    rand bit             refresh;       // READ: rewrite a DTCM block after it (the engine is drained)
+    rand bit [11:0]      csr_addr;
+    rand bit             w1c_all;       // CSR write to npu_status: all four error bits
+    rand bit [31:0]      csr_wdata;
+
+    int unsigned max_steps;             // input: min(WBUF, IBUF) entries written since reset
+
+    constraint c_kind {
+        kind dist {RND_LDW := 30, RND_LDI := 30, RND_MAC := 30, RND_ILLEGAL := 2, RND_READ := 8,
+                   RND_CSR_RD := 3, RND_CSR_WR := 2};
+    }
+
+    // K: legal or not first, then the cg_cmd bin, then the value (the solve order keeps the weights)
+    constraint c_k_order { solve kind before k_ok; solve k_ok before k_bin; solve k_bin before k; }
+    constraint c_k_ok    { k_ok dist {1 := 95, 0 := 5}; }
+    constraint c_k_bin {
+        if (k_ok) k_bin dist {RK_0 := 5, RK_1_7 := 15, RK_8_63 := 30, RK_64_KMAX1 := 35, RK_KMAX := 15};
+        else      k_bin dist {RK_1_7 := 1, RK_8_63 := 1, RK_64_KMAX1 := 1, RK_OVER := 1};
+    }
+    constraint c_k {
+        k_ok == (k <= KMAX && k[1:0] == 2'b00);
+        (k_bin == RK_0)        -> (k == 0);
+        (k_bin == RK_1_7)      -> (k inside {[1:7]});
+        (k_bin == RK_8_63)     -> (k inside {[8:63]});
+        (k_bin == RK_64_KMAX1) -> (k inside {[64:KMAX - 1]});
+        (k_bin == RK_KMAX)     -> (k == KMAX);
+        (k_bin == RK_OVER)     -> (k > KMAX);
+        if (k_bin == RK_OVER)
+            k dist {[KMAX + 1:KMAX + 4] :/ 1, [KMAX + 5:4 * KMAX] :/ 1, [4 * KMAX + 1:32'hFFFF_FFFF] :/ 1};
+    }
+    // spec 7.2: no COMPUTE reads a WBUF/IBUF entry not written since reset (K = 0 and a dropped K read none)
+    constraint c_written { (kind == RND_MAC && k_ok && k != 0) -> (k <= 4 * max_steps); }
+
+    // LOAD addresses; with an illegal K or K = 0 the "last" and "one past" cases use the last quad and
+    // DTCM_END. Every sum below stays far from 2^32 (k <= KMAX where it is used, addr < 2^31).
+    constraint c_a_cls {
+        a_cls dist {RA_IN := 70, RA_FIRST := 10, RA_LAST := 10, RA_MISALIGNED := 4, RA_BELOW := 2,
+                    RA_PAST := 2, RA_ONE_PAST := 1, RA_TOP := 1};
+    }
+    constraint c_addr {
+        if (kind inside {RND_LDW, RND_LDI}) {
+            (a_cls inside {RA_IN, RA_FIRST, RA_LAST}) -> (addr[3:0] == 4'h0 && addr >= DTCM_BASE && addr < DTCM_END);
+            (a_cls == RA_IN && k_ok)                    -> (addr + 4 * k <= DTCM_END);
+            (a_cls == RA_FIRST)                         -> (addr == DTCM_BASE);
+            (a_cls == RA_LAST && k_ok && k != 0)        -> (addr == DTCM_END - 4 * k);
+            (a_cls == RA_LAST && !(k_ok && k != 0))     -> (addr == DTCM_END - QUAD_BYTES);
+            (a_cls == RA_MISALIGNED)                    -> (addr[3:0] != 4'h0 && addr >= DTCM_BASE && addr < DTCM_END);
+            (a_cls == RA_BELOW)                         -> (addr[3:0] == 4'h0 && addr < DTCM_BASE);
+            (a_cls == RA_PAST)                          -> (addr[3:0] == 4'h0 && addr >= DTCM_BASE && addr < 32'h8000_0000);
+            (a_cls == RA_PAST && k_ok && k != 0)        -> (addr + 4 * k > DTCM_END + QUAD_BYTES);
+            (a_cls == RA_PAST && !(k_ok && k != 0))     -> (addr >= DTCM_END);
+            (a_cls == RA_ONE_PAST && k_ok && k != 0)    -> (addr == DTCM_END + QUAD_BYTES - 4 * k);
+            (a_cls == RA_ONE_PAST && !(k_ok && k != 0)) -> (addr == DTCM_END);
+            (a_cls == RA_TOP)                           -> (addr[3:0] == 4'h0 && addr >= 32'hFFFF_F000);
+        }
+    }
+
+    constraint c_gap  { gap dist {0 := 40, [1:3] :/ 30, [4:20] :/ 30}; }
+    constraint c_read { read_all dist {1 := 25, 0 := 75}; refresh dist {1 := 30, 0 := 70}; }
+    constraint c_csr {
+        if (kind == RND_CSR_WR)
+            csr_addr dist {CSR_NPU_STATUS := 80, CSR_NPU_BUSY_CYC := 10,
+                           [0:CSR_NPU_STATUS - 1] :/ 5, [CSR_NPU_BUSY_CYC + 1:12'hFFF] :/ 5};
+        else
+            csr_addr dist {CSR_NPU_STATUS := 70, CSR_NPU_BUSY_CYC := 15,
+                           [0:CSR_NPU_STATUS - 1] :/ 8, [CSR_NPU_BUSY_CYC + 1:12'hFFF] :/ 7};
+        w1c_all dist {1 := 25, 0 := 75};
+        (csr_addr == CSR_NPU_STATUS && w1c_all) -> (csr_wdata == ST_ERR_MASK);
+    }
+
+    function new(string name = "mac_rand_cmd");
+        super.new(name);
+    endfunction
+endclass
+
+// mac_rand_seq: n_items random steps (+MAC_RAND_N=<n>, default 400) on a DTCM filled with random data.
+//
+// Data. The whole DTCM is filled at the start; after 30 % of the READs (READ_RESULT drains the engine,
+// so every queued LOAD has run: the WAR rule, spec 6.3 rule 5) a random block of 1..256 quads is
+// rewritten. Every operand byte is one of {-128, -1, 0, 1, 127} with probability 20 % (each 4 %), else
+// uniform over the other 251 values. A rewritten block is all zero in 10 % of the cases (so a COMPUTE
+// with clr can leave every accumulator 0: cg_cmd acc-nonzero-before = 0) and one corner value in every
+// lane in another 10 %.
+//
+// Written entries. The sequence counts, in program order, the WBUF and IBUF entries written since reset
+// (an executing LOAD of K writes 0..K/4-1; mac_cmd_fate, as in the predictor) and constrains COMPUTE with
+// the smaller count (spec 7.2). The engine executes in program order, so the count at the push is the
+// count at its CHECK.
+//
+// Checks come from the env: every READ and every npu_status read against npu_ref, the SVA, the WAR
+// check in write_word and the end-of-test DTCM mirror. The summary line gives the mix actually drawn and
+// a signature of the whole stimulus stream (the same seed gives the same signature).
+class mac_rand_seq extends mac_base_seq;
+    `uvm_object_utils(mac_rand_seq)
+
+    int unsigned n_items = 400;
+    int unsigned w_written, i_written;          // WBUF/IBUF entries 0..n-1 written since reset
+    int unsigned n_kind  [RND_CSR_WR + 1];      // draws per enum value, indexed by the enum
+    int unsigned n_kbin  [RK_OVER + 1];
+    int unsigned n_acls  [RA_TOP + 1];
+    int unsigned n_k_bad, n_push, n_refresh;
+    bit [31:0]   sig = 32'h811C_9DC5;           // FNV-1a over the stimulus stream
+
+    localparam bit [7:0] CORNERS [5] = '{8'h80, 8'hFF, 8'h00, 8'h01, 8'h7F};
+
+    function new(string name = "mac_rand_seq"); super.new(name); endfunction
+
+    // one operand byte: a corner value with probability 20 %, else one of the 251 others
+    function bit [7:0] rand_lane();
+        int unsigned n;
+        if ($urandom_range(99) < 20) return CORNERS[$urandom_range(4)];
+        n = $urandom_range(250);
+        return (n < 125) ? 8'(n + 2) : 8'(n - 125 + 32'h81);    // 0x02..0x7E, then 0x81..0xFE
+    endfunction
+
+    // pattern 0: biased random lanes; 1: all zero; 2: one corner value in every lane
+    function void fill_quads(int unsigned q0, int unsigned nq, int unsigned pattern);
+        bit [7:0]  c = CORNERS[$urandom_range(4)];
+        bit [31:0] d;
+        for (int unsigned q = q0; q < q0 + nq && q < DTCM_QUADS; q++)
+            for (int unsigned w = 0; w < 4; w++) begin
+                case (pattern)
+                    0:       d = {rand_lane(), rand_lane(), rand_lane(), rand_lane()};
+                    1:       d = '0;
+                    default: d = {4{c}};
+                endcase
+                mem_write(DTCM_BASE + QUAD_BYTES * q + 4 * w, d);
+            end
+    endfunction
+
+    function void refresh_block();
+        int unsigned p = $urandom_range(99);
+        fill_quads($urandom_range(DTCM_QUADS - 1), $urandom_range(256, 1), (p < 80) ? 0 : (p < 90) ? 1 : 2);
+        n_refresh++;
+    endfunction
+
+    function void note(bit [31:0] v);
+        sig = mac_env::fnv1a(sig, v);
+    endfunction
+
+    task body();
+        mac_rand_cmd c = mac_rand_cmd::type_id::create("c");
+        bit [31:0]   d;
+        npu_op_e     op;
+        void'($value$plusargs("MAC_RAND_N=%d", n_items));
+        drain();
+        fill_quads(0, DTCM_QUADS, 0);
+        for (int unsigned n = 0; n < n_items; n++) begin
+            c.max_steps = (w_written < i_written) ? w_written : i_written;
+            if (!c.randomize()) `uvm_fatal("RAND", $sformatf("mac_rand_cmd randomize() failed at step %0d", n))
+            n_kind[c.kind]++;
+            note(c.kind); note(c.gap);
+            case (c.kind)
+                RND_LDW, RND_LDI, RND_MAC, RND_ILLEGAL: begin
+                    op = (c.kind == RND_LDW) ? OP_LDW : (c.kind == RND_LDI) ? OP_LDI :
+                         (c.kind == RND_MAC) ? OP_MAC : OP_ILLEGAL;
+                    n_push++;
+                    n_kbin[c.k_bin]++;
+                    if (!c.k_ok) n_k_bad++;
+                    if (op inside {OP_LDW, OP_LDI}) n_acls[c.a_cls]++;
+                    note(c.addr); note(c.k); note(c.clr);
+                    push(op, c.addr, c.k, c.clr, c.gap);
+                    if (mac_cmd_fate(op, c.addr, c.k) == CMD_EXEC) begin
+                        if (op == OP_LDW && c.k / 4 > w_written) w_written = c.k / 4;
+                        if (op == OP_LDI && c.k / 4 > i_written) i_written = c.k / 4;
+                    end
+                end
+                RND_READ: begin
+                    note(c.idx); note(c.read_all); note(c.refresh);
+                    read(c.idx, d, c.gap);
+                    if (c.read_all) check_all();
+                    if (c.refresh) refresh_block();             // drained by the READ above
+                end
+                RND_CSR_RD: begin
+                    note(c.csr_addr);
+                    csr_rd(c.csr_addr, d, c.gap);
+                end
+                default: begin                                  // RND_CSR_WR
+                    note(c.csr_addr); note(c.csr_wdata);
+                    csr_wr(c.csr_addr, c.csr_wdata, c.gap);
+                end
+            endcase
+        end
+        drain();
+        `uvm_info("MAC_RAND", $sformatf({"%0d steps: LDW %0d, LDI %0d, MAC %0d, ILLEGAL %0d, READ %0d, CSR_RD %0d, ",
+                  "CSR_WR %0d; %0d pushes, illegal K %0d (%0.1f%%); K bins 0:%0d 1-7:%0d 8-63:%0d 64-KMAX-1:%0d ",
+                  "KMAX:%0d >KMAX:%0d; LOAD address in/first/last %0d/%0d/%0d, misaligned %0d, below %0d, ",
+                  "past %0d, one past %0d, top %0d; %0d DTCM blocks rewritten; entries written WBUF %0d IBUF %0d; ",
+                  "stimulus signature %08x"},
+                  n_items, n_kind[RND_LDW], n_kind[RND_LDI], n_kind[RND_MAC], n_kind[RND_ILLEGAL],
+                  n_kind[RND_READ], n_kind[RND_CSR_RD], n_kind[RND_CSR_WR], n_push, n_k_bad,
+                  (n_push == 0) ? 0.0 : 100.0 * n_k_bad / n_push,
+                  n_kbin[RK_0], n_kbin[RK_1_7], n_kbin[RK_8_63], n_kbin[RK_64_KMAX1], n_kbin[RK_KMAX], n_kbin[RK_OVER],
+                  n_acls[RA_IN], n_acls[RA_FIRST], n_acls[RA_LAST], n_acls[RA_MISALIGNED], n_acls[RA_BELOW],
+                  n_acls[RA_PAST], n_acls[RA_ONE_PAST], n_acls[RA_TOP], n_refresh, w_written, i_written, sig),
+                  UVM_LOW)
     endtask
 endclass
