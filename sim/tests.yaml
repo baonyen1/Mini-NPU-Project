@@ -10,6 +10,10 @@ envs:
     filelist: tb/uvm/mac_env/mac_dv.f
     top: mac_tb_top
     dpi: [model/c/npu_ref.c]
+  # dummy tests that check run.py's own judgement (sim/selftest/check_run_py.py); no DUT, no DPI
+  selftest:
+    filelist: sim/selftest/selftest_dv.f
+    top: selftest_tb_top
 
 tests:
   mac_single_k4:               {env: mac}
@@ -43,6 +47,9 @@ tests:
   mac_unwritten_entry_flagged: {env: mac, expect: fail, expect_ids: [UNWRITTEN_ENTRY]}
   # Step 6: mac_rand_seq, random op mix (spec 10.3); run with --seeds N (plan: >= 200)
   mac_rand:                    {env: mac}
+  # run_py_selftest: one expected-pass and one expected-fail dummy test
+  selftest_pass:               {env: selftest}
+  selftest_fail:               {env: selftest, expect: fail, expect_ids: [SELFTEST_FAIL]}
 
 suites:
   mac_directed:
@@ -70,3 +77,6 @@ suites:
     - mac_unwritten_entry_flagged
   mac_rand:
     - mac_rand
+  selftest:
+    - selftest_pass
+    - selftest_fail

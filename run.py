@@ -5,6 +5,8 @@
     python run.py --target mac_w1c --config d1          # one test, D1 (GATING_EN = 1)
     python run.py --target mac_directed --seeds 3 --cov # seeds 1..3, functional coverage saved (UCDB)
     python run.py --list                                # the tests and suites known to sim/tests.yaml
+    python run.py --target selftest                     # run.py's own self-test (two dummy UVM tests)
+    python run.py --target selftest --tests other.yaml  # the same with another test list
 
 Per (env, config) it builds once: the DPI-C library from the env's C sources with gcc, then vlog of the
 env's compile list. Then one vsim per test and seed. Logs: out/<date>/<config>/<test>/<seed>/sim.log.
@@ -32,17 +34,27 @@ ROOT = Path(__file__).resolve().parent
 TESTS_YAML = ROOT / "sim" / "tests.yaml"
 
 
-def load_db():
-    with open(TESTS_YAML, encoding="utf-8") as f:
+def shown(path):
+    """A test list as printed: relative to the repository root when it is inside it."""
+    try:
+        return path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def load_db(path):
+    if not path.is_file():
+        sys.exit(f"run.py: no test list {shown(path)}")
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
-def expand_target(db, target):
+def expand_target(db, target, path):
     if target in db.get("suites", {}):
         return list(db["suites"][target])
     if target in db.get("tests", {}):
         return [target]
-    sys.exit(f"run.py: '{target}' is neither a test nor a suite in {TESTS_YAML.relative_to(ROOT)}")
+    sys.exit(f"run.py: '{target}' is neither a test nor a suite in {shown(path)}")
 
 
 def tool(name):
@@ -198,9 +210,13 @@ def main():
     ap.add_argument("--cov", action="store_true", help="save functional coverage (UCDB) per run")
     ap.add_argument("--timeout-cyc", type=int, help="override +TIMEOUT_CYC")
     ap.add_argument("--list", action="store_true", help="list tests and suites")
+    # another test list; sim/selftest/check_run_py.py uses it to flip one expectation in a temporary copy.
+    # Paths inside the list (filelist, dpi) stay relative to the repository root.
+    ap.add_argument("--tests", type=Path, default=TESTS_YAML, help="test list (default sim/tests.yaml)")
     args = ap.parse_args()
 
-    db = load_db()
+    args.tests = args.tests.resolve()
+    db = load_db(args.tests)
     if args.list:
         print("suites:", ", ".join(db.get("suites", {})))
         for name, spec in db["tests"].items():
@@ -211,7 +227,7 @@ def main():
     if args.simulator == "xsim":
         sys.exit("run.py: xsim is not supported yet (Vivado is not installed on the team machine)")
 
-    tests = expand_target(db, args.target)
+    tests = expand_target(db, args.target, args.tests)
     out_dir = ROOT / "out" / datetime.date.today().isoformat()
     builds = {}
     results = []
