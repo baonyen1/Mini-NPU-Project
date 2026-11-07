@@ -115,7 +115,7 @@
 - Create: `tb/uvm/common/npu_cosim_checker.sv` (subscriber: on each `npu_rvvi_item`, call `iss_step(&rec)` and compare)
 - Create: `tb/uvm/common/npu_sim_ctrl_if.sv`, `npu_sim_ctrl_monitor` (ends the test on PASS/FAIL; raises `UVM_FATAL` on timeout)
 - Create: `tb/uvm/common/npu_base_test.sv` (backdoor load from plusargs, objection until `sim_ctrl` end or timeout)
-- Create **[support]**: `run.py`, `sim/tests.yaml` (test → env, firmware, expected result `pass|fail`, seeds), `manifest.yaml` writer *(done 2026-11-07 for QuestaSim, with Task 16: per-build `modelsim.ini` mapping UVM 1.2, expected-fail tests judged by their error IDs; `run_py_selftest` done 2026-11-07: dummy tests in `sim/selftest/`, suite `selftest`, `--tests <yaml>`; `sim/selftest/check_run_py.py` checks that run.py rejects a violation of each pass-rule condition (summary, UVM_ERROR, UVM_FATAL, simulator error) and of each half of the expected-fail ID rule; `--simulator xsim` is open)*
+- Create **[support]**: `run.py`, `sim/tests.yaml` (test → env, firmware, expected result `pass|fail`, seeds), `manifest.yaml` writer *(QuestaSim part done 2026-11-07, with Task 16: a `modelsim.ini` per run mapping UVM 1.2; expected-fail tests judged by their error IDs; one directory per invocation, `out/<date>/<config>/<HHMMSS>-<target>/`, holding its build, logs, UCDBs and `manifest.yaml` with the SHA-256 of each `sim.log` and `cov.ucdb`; nested suites (expanded recursively, a cycle stops); per-env `gating` key; `--wall-limit` (default 600 s; a killed run fails). `run_py_selftest` done 2026-11-07: dummy tests in `sim/selftest/`, suite `selftest`, `--tests <yaml>`; `sim/selftest/check_run_py.py` checks that run.py rejects a violation of each pass-rule condition (summary, UVM_ERROR, UVM_FATAL, simulator error), of each half of the expected-fail ID rule and of the wall-clock limit, expands a nested suite, rejects a cycle, an empty suite and `--seeds 0`, and leaves every run directory intact. Still open: the `firmware` field and the `+ITCM`/`+DTCM` plusargs (needed from Task 17), per-test seeds, per-test timeout, `--simulator xsim`, and a measured licence type in the manifest (it records the Task 0 result as fixed text))*
 - Modify (Tấn): `model/c/rv_iss.{h,c}`: add `uint32_t iss_mem_read(uint32_t addr);` (needed by Task 18 end-of-test check)
 
 **Interfaces:**
@@ -123,7 +123,7 @@
 - Produces:
   - `class npu_rvvi_item extends uvm_sequence_item;` fields mirror `rvvi_rec_t` (`order, pc, insn, rd, rd_wdata, mem_addr, mem_wdata, mem_wmask, trap`)
   - `class npu_cosim_checker extends uvm_subscriber #(npu_rvvi_item);` config: `iss_mode` (`ISS_STUB`|`ISS_FULL`), `mask_csr_reads` = {0xB00, 0xB80, 0xC00, 0xC80, 0x7C1} (§10.2). Reports `COSIM_MISMATCH` with the first differing field.
-  - `run.py --simulator {questa,xsim} --target <test|suite> [--config d0|d1] [--seeds N] [--cov]` → exit 0 iff every run matches its expected result; logs in `out/<date>/<config>/<test>/<seed>/`.
+  - `run.py --simulator {questa,xsim} --target <test|suite> [--config d0|d1] [--seeds N] [--cov]` → exit 0 iff every run matches its expected result; logs in `out/<date>/<config>/<HHMMSS>-<target>/<test>/<seed>/` (one directory per invocation since 2026-11-07, so no run overwrites an earlier one).
 
 - [ ] **Step 1: Write the failing tests:**
   - `cosim_selftest_pass`: a 20-instruction ALU program on `core_env` (Task 17 skeleton) → 0 mismatches
@@ -156,7 +156,7 @@
   - `mac_single_k4` (hand data), `mac_k_kmax`, `mac_k0`, `mac_k_too_big` (1028), `mac_k_mod4` (6), `mac_misaligned` (`a[3:0]=4`), `mac_addr_oob`, `mac_addr_wraps_32bit` (`0xFFFF_FFF0`, K=8), `mac_illegal`
   - `mac_clr_vs_accum`, `mac_forced_wrap` (repeat COMPUTE clr=0 with all lanes −128 until `acc` wraps; expected value from `npu_ref`)
   - `mac_fifo_full` (8 back-to-back pushes + 1 more while busy; `cmd_ready` low observed), `mac_read_while_busy` (`rd_ready` low until drained), `mac_w1c`
-  - `mac_mem_mirror_check` (Review Focus 2): every test's `report_phase` compares a hash of the responder memory with `npu_ref_mem_read` over all 16,384 words
+  - `mac_mem_mirror_check` (Review Focus 2): every test's `check_phase` (in `mac_env`) compares a hash of the responder memory with `npu_ref_mem_read` over all 16,384 words
   - `mac_unwritten_entry_flagged` (Review Focus 4, expected-fail): COMPUTE K=8 after reset with only one quad loaded → `UVM_ERROR UNWRITTEN_ENTRY`
 - [x] **Step 2:** `run.py --target mac_directed` → FAIL. **Step 3:** Implement env, agents, predictor, scoreboard, SVA. **Step 4:** All pass; expected-fail test fails for the stated reason only.
 - [x] **Step 5: Commit** `feat(tb): mac_env directed`.

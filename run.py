@@ -5,15 +5,19 @@
     python run.py --target mac_w1c --config d1          # one test, D1 (GATING_EN = 1)
     python run.py --target mac_directed --seeds 3 --cov # seeds 1..3, functional coverage saved (UCDB)
     python run.py --list                                # the tests and suites known to sim/tests.yaml
-    python run.py --target selftest                     # run.py's own self-test (two dummy UVM tests)
+    python run.py --target selftest                     # run.py's own self-test (three dummy UVM tests)
     python run.py --target selftest --tests other.yaml  # the same with another test list
 
-Per (env, config) it builds once: the DPI-C library from the env's C sources with gcc, then vlog of the
-env's compile list. Then one vsim per test and seed. Logs: out/<date>/<config>/<test>/<seed>/sim.log.
+Every invocation gets a directory of its own, out/<date>/<config>/<HHMMSS>-<target>[-N]/ (printed at
+the end), so no run overwrites the evidence of an earlier one and two concurrent runs share no work
+library. In it, per env: build_<env>/ (the DPI-C library built from the env's C sources with gcc, then
+vlog of the env's compile list); then one vsim per test and seed, log in <test>/<seed>/sim.log (and
+cov.ucdb with --cov). A suite may list tests and other suites (expanded recursively; a cycle stops).
 A run passes when the log has the UVM report summary, UVM_ERROR : 0, UVM_FATAL : 0 and no simulator
-error. An expected-fail test (sim/tests.yaml) must fail, and only with the IDs it lists. The exit code
-is 0 only if every run matched its expectation. out/<date>/manifest.yaml records the tools and the
-git revision of the run.
+error. An expected-fail test (sim/tests.yaml) must fail, and only with the IDs it lists. A run killed at
+the wall-clock limit (--wall-limit) is a failure either way. The exit code is 0 only if every run
+matched its expectation. <run directory>/manifest.yaml records the tools, the git revision and, per
+run, the result and the SHA-256 of its sim.log and cov.ucdb.
 
 Only QuestaSim is supported for now: Vivado (xsim) is no longer installed on the team machine
 (CLAUDE.md section 10). vlog, vsim and gcc must be on PATH (QuestaSim: C:\\questasim64_10.7c\\win64).
@@ -25,6 +29,7 @@ import os
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -50,18 +55,35 @@ def load_db(path):
         return yaml.safe_load(f)
 
 
+def expand_suite(db, suite, path, stack=()):
+    """The tests of a suite in order, each once. An entry is a test when a test of that name exists
+    (suite mac_rand lists test mac_rand), otherwise a suite, expanded recursively."""
+    if suite in stack:
+        sys.exit(f"run.py: suite cycle {' -> '.join(stack + (suite,))} in {shown(path)}")
+    tests = []
+    for entry in db["suites"][suite] or []:
+        if entry in db.get("tests", {}):
+            found = [entry]
+        elif entry in db.get("suites", {}):
+            found = expand_suite(db, entry, path, stack + (suite,))
+        else:
+            sys.exit(f"run.py: suite '{suite}' lists '{entry}', neither a test nor a suite in {shown(path)}")
+        tests += [t for t in found if t not in tests]
+    return tests
+
+
 def expand_target(db, target, path):
     if target in db.get("suites", {}):
-        return list(db["suites"][target])
+        return expand_suite(db, target, path)
     if target in db.get("tests", {}):
         return [target]
     sys.exit(f"run.py: '{target}' is neither a test nor a suite in {shown(path)}")
 
 
-def tool(name):
+def tool(name, why=""):
     path = shutil.which(name)
     if path is None:
-        sys.exit(f"run.py: '{name}' is not on PATH")
+        sys.exit(f"run.py: '{name}' is not on PATH{why}")
     return path
 
 
@@ -88,7 +110,7 @@ def questa_home():
 
 def questa_ini(bdir):
     """Spec D1 asks for UVM 1.2, but the installation's modelsim.ini maps mtiUvm to uvm-1.1d. A copy in the
-    build directory maps it to the precompiled uvm-1.2 instead; vlog and vsim find it through $MODELSIM."""
+    run directory maps it to the precompiled uvm-1.2 instead; vlog and vsim find it through $MODELSIM."""
     home = questa_home()
     text = (home / "modelsim.ini").read_text(encoding="utf-8", errors="replace")
     text, n = re.subn(r"^mtiUvm\s*=.*$", f"mtiUvm = {(home / 'uvm-1.2').as_posix()}", text, flags=re.M)
@@ -99,13 +121,35 @@ def questa_ini(bdir):
     QUESTA_ENV["MODELSIM"] = str(ini)
 
 
-def build(env_name, env, config, out_dir):
+def make_run_dir(target, config):
+    """out/<date>/<config>/<HHMMSS>-<target>, with -2, -3, ... appended when it already exists (two
+    invocations in the same second). mkdir without exist_ok claims the name atomically."""
+    now = datetime.datetime.now()
+    base = ROOT / "out" / now.date().isoformat() / config
+    base.mkdir(parents=True, exist_ok=True)
+    stem = f"{now:%H%M%S}-{re.sub(r'[^A-Za-z0-9_.-]', '_', target)}"
+    for n in range(1, 1000):
+        run_dir = base / (stem if n == 1 else f"{stem}-{n}")
+        try:
+            run_dir.mkdir()
+            return run_dir
+        except FileExistsError:
+            continue
+    sys.exit(f"run.py: no free run directory for {base / stem}")
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def build(env_name, env, run_dir):
     """Build the DPI library and compile the env once; return (work dir, library path without suffix)."""
-    bdir = out_dir / config / f"build_{env_name}"
-    if bdir.exists():
-        shutil.rmtree(bdir)
-    bdir.mkdir(parents=True)
-    questa_ini(bdir)
+    bdir = run_dir / f"build_{env_name}"
+    bdir.mkdir()
     lib = bdir / "dpi"
     suffix = ".dll" if platform.system() == "Windows" else ".so"
     srcs = [str(ROOT / s) for s in env.get("dpi", [])]
@@ -144,28 +188,61 @@ def judge(text):
     return finished, n_err, n_fat, sim_errors, ids
 
 
-def run_one(test, spec, env, work, lib, config, seed, out_dir, args):
-    rdir = out_dir / config / test / str(seed)
-    rdir.mkdir(parents=True, exist_ok=True)
+def kill_tree(proc):
+    """vsim starts the simulation kernel as a child process; kill both, not only vsim."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+    else:
+        os.killpg(proc.pid, signal.SIGKILL)
+    proc.wait()
+
+
+def run_limited(cmd, log, limit_s):
+    """Run cmd with its output in log; kill it after limit_s seconds of wall-clock time (a zero-time loop
+    never reaches the env's +TIMEOUT_CYC watchdog). Return True when the limit was hit."""
+    group = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" \
+        else {"start_new_session": True}
+    with open(log, "w", encoding="utf-8") as f:
+        proc = subprocess.Popen(cmd, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT, env=QUESTA_ENV, **group)
+        try:
+            proc.wait(timeout=limit_s)
+            return False
+        except subprocess.TimeoutExpired:
+            kill_tree(proc)
+    with open(log, "a", encoding="utf-8") as f:
+        f.write(f"\n# run.py: killed at the wall-clock limit of {limit_s} s (--wall-limit)\n")
+    return True
+
+
+def run_one(test, spec, env, work, lib, config, seed, run_dir, args):
+    rdir = run_dir / test / str(seed)
+    rdir.mkdir(parents=True)
     log = rdir / "sim.log"
+    ucdb = rdir / "cov.ucdb"
     do = "run -all; quit -f"
-    cmd = [tool("vsim"), "-c", "-lib", rel(work), f"-GGATING_EN={1 if config == 'd1' else 0}",
-           env["top"], f"+UVM_TESTNAME={test}", "-sv_seed", str(seed)]
+    cmd = [tool("vsim"), "-c", "-lib", rel(work)]
+    # only an env whose top declares GATING_EN (gating: true in sim/tests.yaml) gets the D0/D1 parameter
+    if env.get("gating", False):
+        cmd.append(f"-GGATING_EN={1 if config == 'd1' else 0}")
+    cmd += [env["top"], f"+UVM_TESTNAME={test}", "-sv_seed", str(seed)]
     if lib is not None:
         cmd += ["-sv_lib", rel(lib)]
     if args.timeout_cyc:
         cmd.append(f"+TIMEOUT_CYC={args.timeout_cyc}")
     if args.cov:
         cmd.append("-coverage")
-        do = f"coverage save -onexit {rel(rdir / 'cov.ucdb')}; " + do
+        do = f"coverage save -onexit {rel(ucdb)}; " + do
     cmd += ["-do", do]
-    with open(log, "w", encoding="utf-8") as f:
-        subprocess.run(cmd, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT, env=QUESTA_ENV)
+    killed = run_limited(cmd, log, args.wall_limit)
     finished, n_err, n_fat, sim_errors, ids = judge(log.read_text(encoding="utf-8", errors="replace"))
-    passed = finished and n_err == 0 and n_fat == 0 and not sim_errors
+    passed = finished and n_err == 0 and n_fat == 0 and not sim_errors and not killed
 
     expect = spec.get("expect", "pass")
-    if expect == "pass":
+    if killed:
+        # neither a pass nor the expected failure: the run did not end by itself
+        ok = False
+        why = f"killed at the wall-clock limit of {args.wall_limit} s (--wall-limit)"
+    elif expect == "pass":
         ok = passed
         why = "" if ok else f"UVM_ERROR {n_err}, UVM_FATAL {n_fat}, IDs {ids}" + \
               ("" if finished else ", no UVM report summary") + (f", {sim_errors[0]}" if sim_errors else "")
@@ -174,10 +251,10 @@ def run_one(test, spec, env, work, lib, config, seed, out_dir, args):
         ok = finished and not passed and not sim_errors and bool(ids) and set(ids) <= want and want <= set(ids)
         why = "" if ok else f"expected a failure with exactly {sorted(want)}, got IDs {ids}" + \
               ("" if finished else ", no UVM report summary")
-    return ok, passed, why, log
+    return ok, passed, why, log, (ucdb if args.cov else None)
 
 
-def write_manifest(out_dir, args, results):
+def write_manifest(run_dir, args, results):
     git = first_line(["git", "rev-parse", "HEAD"])
     dirty = bool(subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True,
                                 cwd=ROOT).stdout.strip())
@@ -189,8 +266,7 @@ def write_manifest(out_dir, args, results):
         "tools": {
             "questasim": first_line([tool("vsim"), "-version"]),
             "questasim_licence": "full (UVM, randomize, covergroup and DPI-C verified in Task 0, docs/smoke/results.md)",
-            # gcc is needed only by an env with DPI sources; the manifest must not stop a run without it
-            "gcc": first_line(["gcc", "--version"]) if shutil.which("gcc") else "not on PATH",
+            "gcc": first_line(["gcc", "--version"]),     # main() has checked that it is on PATH
             "python": sys.version.split()[0],
             "verilator": first_line(["verilator", "--version"]) if shutil.which("verilator")
                          else "not on PATH here (it runs under WSL on the team machine)",
@@ -198,10 +274,9 @@ def write_manifest(out_dir, args, results):
         "command": " ".join(sys.argv),
         "results": results,
     }
-    path = out_dir / "manifest.yaml"
-    old = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else None
-    runs = (old.get("runs", []) if isinstance(old, dict) else []) + [manifest]
-    path.write_text(yaml.safe_dump({"runs": runs}, sort_keys=False), encoding="utf-8")
+    # one manifest per run directory: nothing is appended to a shared file, so concurrent runs cannot race
+    path = run_dir / "manifest.yaml"
+    path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
     return path
 
 
@@ -213,16 +288,28 @@ def main():
     ap.add_argument("--seeds", type=int, default=1, help="run seeds 1..N")
     ap.add_argument("--cov", action="store_true", help="save functional coverage (UCDB) per run")
     ap.add_argument("--timeout-cyc", type=int, help="override +TIMEOUT_CYC")
+    # a backstop for what +TIMEOUT_CYC cannot catch (a zero-time loop); mac_rand takes about 4 s per seed
+    ap.add_argument("--wall-limit", type=int, default=600, metavar="SECONDS",
+                    help="kill a vsim run after this wall-clock time and judge it a failure (default 600)")
     ap.add_argument("--list", action="store_true", help="list tests and suites")
     # another test list; sim/selftest/check_run_py.py uses it to flip one expectation in a temporary copy.
     # Paths inside the list (filelist, dpi) stay relative to the repository root.
     ap.add_argument("--tests", type=Path, default=TESTS_YAML, help="test list (default sim/tests.yaml)")
     args = ap.parse_args()
 
+    if args.seeds < 1:
+        ap.error("--seeds must be at least 1")
+    if args.wall_limit < 1:
+        ap.error("--wall-limit must be at least 1 s")
+
     args.tests = args.tests.resolve()
     db = load_db(args.tests)
     if args.list:
-        print("suites:", ", ".join(db.get("suites", {})))
+        print("suites:")
+        for name, entries in db.get("suites", {}).items():
+            n = len(expand_target(db, name, args.tests))
+            print(f"  {name:32s} {n:3d} tests = {' + '.join(entries or [])}")
+        print("tests:")
         for name, spec in db["tests"].items():
             print(f"  {name:32s} env={spec['env']} expect={spec.get('expect', 'pass')}")
         return 0
@@ -232,7 +319,14 @@ def main():
         sys.exit("run.py: xsim is not supported yet (Vivado is not installed on the team machine)")
 
     tests = expand_target(db, args.target, args.tests)
-    out_dir = ROOT / "out" / datetime.date.today().isoformat()
+    if not tests:
+        sys.exit(f"run.py: '{args.target}' expands to no test, nothing to run")
+    for name in ("vlog", "vsim"):
+        tool(name)
+    tool("gcc", " (QuestaSim compiles the DPI export wrapper of uvm_pkg with it for every UVM run, "
+                "vsim-7019; it also builds an env's DPI-C library)")
+    run_dir = make_run_dir(args.target, args.config)
+    questa_ini(run_dir)
     builds = {}
     results = []
     n_bad = 0
@@ -241,20 +335,25 @@ def main():
         env_name = spec["env"]
         if env_name not in builds:
             print(f"== build {env_name} ({args.config})", flush=True)
-            builds[env_name] = build(env_name, db["envs"][env_name], args.config, out_dir)
+            builds[env_name] = build(env_name, db["envs"][env_name], run_dir)
         work, lib = builds[env_name]
         for seed in range(1, args.seeds + 1):
-            ok, passed, why, log = run_one(test, spec, db["envs"][env_name], work, lib,
-                                           args.config, seed, out_dir, args)
+            ok, passed, why, log, ucdb = run_one(test, spec, db["envs"][env_name], work, lib,
+                                                 args.config, seed, run_dir, args)
             expect = spec.get("expect", "pass")
             verdict = ("PASS" if passed else "FAIL") + ("" if expect == "pass" else " (expected fail)")
             print(f"{'ok ' if ok else 'BAD'}  {test:32s} seed {seed}  {verdict}  {why}", flush=True)
-            results.append({"test": test, "config": args.config, "seed": seed, "expect": expect,
-                            "result": "pass" if passed else "fail", "matches_expectation": ok,
-                            "log": log.relative_to(ROOT).as_posix()})
+            entry = {"test": test, "config": args.config, "seed": seed, "expect": expect,
+                     "result": "pass" if passed else "fail", "matches_expectation": ok,
+                     "log": log.relative_to(ROOT).as_posix(), "log_sha256": sha256(log)}
+            if ucdb is not None:
+                entry["cov"] = ucdb.relative_to(ROOT).as_posix()
+                entry["cov_sha256"] = sha256(ucdb) if ucdb.is_file() else "missing"
+            results.append(entry)
             n_bad += 0 if ok else 1
-    manifest = write_manifest(out_dir, args, results)
+    manifest = write_manifest(run_dir, args, results)
     print(f"{len(results) - n_bad}/{len(results)} runs as expected; manifest {manifest.relative_to(ROOT).as_posix()}")
+    print(f"run directory: {run_dir.relative_to(ROOT).as_posix()}")
     print("RESULT: PASS" if n_bad == 0 else "RESULT: FAIL")
     return 0 if n_bad == 0 else 1
 

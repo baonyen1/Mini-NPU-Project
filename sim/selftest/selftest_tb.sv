@@ -8,9 +8,10 @@
 //   selftest_fatal:      one UVM_FATAL, ID SELFTEST_FATAL (expected-fail in sim/tests.yaml)
 //   selftest_sva:        a failing immediate assertion ("# ** Error" in the log), UVM_ERROR 0, UVM_FATAL 0
 //   selftest_no_summary: $finish before the run phase ends, so no UVM report summary
-// selftest_sva and selftest_no_summary are not in sim/tests.yaml: no expectation in run.py's rules fits them
-// (an expected-fail test needs the summary and error IDs). sim/selftest/check_run_py.py adds them, expected
-// to pass, to a temporary test list and checks that run.py rejects them.
+//   selftest_hang:       a zero-time loop: simulated time stops, so only run.py's wall-clock limit ends it
+// selftest_sva, selftest_no_summary and selftest_hang are not in sim/tests.yaml: no expectation in run.py's
+// rules fits them (an expected-fail test needs the summary and error IDs). sim/selftest/check_run_py.py adds
+// them, expected to pass, to a temporary test list and checks that run.py rejects them.
 package selftest_pkg;
     import uvm_pkg::*;
     `include "uvm_macros.svh"
@@ -103,14 +104,25 @@ package selftest_pkg;
             $finish;
         endfunction
     endclass
+
+    class selftest_hang extends selftest_base;
+        `uvm_component_utils(selftest_hang)
+
+        function new(string name, uvm_component parent);
+            super.new(name, parent);
+        endfunction
+
+        // never returns and never advances time (a testbench bug of this kind defeats any #delay watchdog)
+        function void body();
+            int unsigned spins = 0;
+            while (1'b1) spins++;
+        endfunction
+    endclass
 endpackage
 
 module selftest_tb_top;
     import uvm_pkg::*;
     import selftest_pkg::*;
-
-    // run.py passes -GGATING_EN=<0|1> to every top; this one only accepts it (nothing is gated here)
-    parameter bit GATING_EN = 1'b0;
 
     initial run_test();
 endmodule
