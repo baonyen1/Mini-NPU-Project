@@ -1,7 +1,8 @@
 `timescale 1ns / 1ps
 
 // mac_tb_top - top of mac_env (Phase 2 Task 16): clock, reset, interfaces, the DUT, the bound SVA and
-// coverage probe, and run_test(). Select the test with +UVM_TESTNAME=<test>; D1 with -GGATING_EN=1.
+// coverage probe (tb/sva/mac_engine_bind.sv), and run_test(). Select the test with +UVM_TESTNAME=<test>;
+// D1 with -GGATING_EN=1.
 // Reset: rst_n low for 5 cycles, released 1 ns after an edge (in the SoC, npu_top synchronises it, D18).
 module mac_tb_top;
     import uvm_pkg::*;
@@ -45,35 +46,12 @@ module mac_tb_top;
         .rst_n     (cmd_if.rst_n)
     );
 
-    // spec 10.6 assertions and the coverage probe, on the engine's internal signals
-    bind mac_engine mac_engine_sva u_sva (
-        .clk          (clk),
-        .rst_n        (rst_n),
-        .state        (state_q),
-        .fifo_do_push (u_fifo.do_push),
-        .fifo_pop     (fifo_pop),
-        .fifo_full    (fifo_full),
-        .fifo_empty   (fifo_empty),
-        .fifo_count   (u_fifo.count_q),
-        .rd_ready     (rd_ready),
-        .b_req        (b_req),
-        .b_addr       (b_addr),
-        .buf_we       (wr_pend_q),
-        .head_k       (head.k),
-        .head_addr    (head.addr)
-    );
+    // spec 10.6 assertions and the coverage probe, bound into the engine (shared with Task 18's top)
+    mac_engine_bind u_mac_engine_bind ();
 
     // the pop marker of mac_cmd_if: the engine pops the FIFO head in CHECK (see mac_probe_if)
     localparam logic [1:0] FSM_CHECK = 2'd1;               // mac_engine state_e encoding of CHECK
     assign cmd_if.eng_pop = (dut.u_probe.state == FSM_CHECK);
-
-    bind mac_engine mac_probe_if u_probe (
-        .clk        (clk),
-        .rst_n      (rst_n),
-        .state      (state_q),
-        .fifo_count (u_fifo.count_q),
-        .fifo_full  (fifo_full)
-    );
 
     initial begin
         uvm_config_db #(virtual mac_cmd_if)::set(null, "*", "cmd_vif", cmd_if);

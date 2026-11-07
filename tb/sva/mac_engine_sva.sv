@@ -1,10 +1,11 @@
 `timescale 1ns / 1ps
 
 // mac_engine_sva - the spec 10.6 assertions A-MAC-1..5 for mac_engine (Phase 2 Task 16). Bound into
-// every mac_engine instance by the env top (bind mac_engine mac_engine_sva u_sva (...)), so its inputs
-// are the engine's own internal signals. A failure reports UVM_ERROR with the assertion ID, so a UVM test
-// fails on it (CLAUDE.md section 5: zero assertion failures). Each property also has a cover, so a
-// property that is never exercised shows up as uncovered rather than as a silent pass.
+// every mac_engine instance by tb/sva/mac_engine_bind.sv (bind mac_engine mac_engine_sva u_sva (...)), so
+// its inputs are the engine's own internal signals. A failure reports UVM_ERROR with the assertion ID, so a
+// UVM test fails on it (CLAUDE.md section 5: zero assertion failures). Each property also has a cover, so a
+// property that is never exercised shows up as uncovered rather than as a silent pass. The action blocks
+// run after the edge's updates, so the messages print the $sampled values the property used.
 module mac_engine_sva
   import npu_pkg::*;
 (
@@ -37,7 +38,7 @@ module mac_engine_sva
     a_mac1_pop: assert property (fifo_pop |-> !fifo_empty)
         else `uvm_error("A-MAC-1", "the FSM popped the empty FIFO")
     a_mac1_count: assert property (fifo_count <= FIFO_DEPTH)
-        else `uvm_error("A-MAC-1", $sformatf("FIFO count %0d above FIFO_DEPTH", fifo_count))
+        else `uvm_error("A-MAC-1", $sformatf("FIFO count %0d above FIFO_DEPTH", $sampled(fifo_count)))
     c_mac1_full: cover property (fifo_full);
 
     // A-MAC-2: rd_ready only when the FIFO is empty and the FSM is idle
@@ -47,9 +48,9 @@ module mac_engine_sva
 
     // A-MAC-3: b_req only in LOAD; b_addr inside the DTCM
     a_mac3_state: assert property (b_req |-> state == S_LOAD)
-        else `uvm_error("A-MAC-3", $sformatf("b_req in state %0d", state))
+        else `uvm_error("A-MAC-3", $sformatf("b_req in state %0d", $sampled(state)))
     a_mac3_addr: assert property (b_req |-> b_addr <= DTCM_QUADS - 1)
-        else `uvm_error("A-MAC-3", $sformatf("b_addr %0d outside the DTCM", b_addr))
+        else `uvm_error("A-MAC-3", $sformatf("b_addr %0d outside the DTCM", $sampled(b_addr)))
     c_mac3: cover property (b_req);
 
     // A-MAC-3, which quads: the n-th b_req after a CHECK reads quad (addr - DTCM_BASE)/16 + n of that
@@ -74,7 +75,7 @@ module mac_engine_sva
 
     // A-MAC-4: buffers are written only in LOAD
     a_mac4: assert property (buf_we |-> state == S_LOAD)
-        else `uvm_error("A-MAC-4", $sformatf("WBUF/IBUF written in state %0d", state))
+        else `uvm_error("A-MAC-4", $sformatf("WBUF/IBUF written in state %0d", $sampled(state)))
     c_mac4: cover property (buf_we);
 
     // A-MAC-5: a popped command is back in IDLE within K/4 + 3 cycles. run_q counts the non-IDLE cycles
@@ -94,6 +95,7 @@ module mac_engine_sva
     end
 
     a_mac5: assert property ((state != S_IDLE) |-> (run_q + 35'd1 <= lim_now))
-        else `uvm_error("A-MAC-5", $sformatf("command busy for %0d cycles, bound K/4+3 = %0d", run_q + 1, lim_now))
+        else `uvm_error("A-MAC-5", $sformatf("command busy for %0d cycles, bound K/4+3 = %0d",
+                                             $sampled(run_q) + 35'd1, $sampled(lim_now)))
     c_mac5: cover property (state == S_CHECK ##1 state != S_IDLE);
 endmodule
