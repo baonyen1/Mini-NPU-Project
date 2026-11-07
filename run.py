@@ -20,6 +20,7 @@ Only QuestaSim is supported for now: Vivado (xsim) is no longer installed on the
 """
 import argparse
 import datetime
+import hashlib
 import os
 import platform
 import re
@@ -183,10 +184,13 @@ def write_manifest(out_dir, args, results):
     manifest = {
         "date": datetime.datetime.now().isoformat(timespec="seconds"),
         "git": {"commit": git, "dirty": dirty},
+        # the test list decides the expectations; a flipped temporary copy (check_run_py.py) shows up here
+        "tests": {"path": shown(args.tests), "sha256": hashlib.sha256(args.tests.read_bytes()).hexdigest()},
         "tools": {
             "questasim": first_line([tool("vsim"), "-version"]),
             "questasim_licence": "full (UVM, randomize, covergroup and DPI-C verified in Task 0, docs/smoke/results.md)",
-            "gcc": first_line([tool("gcc"), "--version"]),
+            # gcc is needed only by an env with DPI sources; the manifest must not stop a run without it
+            "gcc": first_line(["gcc", "--version"]) if shutil.which("gcc") else "not on PATH",
             "python": sys.version.split()[0],
             "verilator": first_line(["verilator", "--version"]) if shutil.which("verilator")
                          else "not on PATH here (it runs under WSL on the team machine)",

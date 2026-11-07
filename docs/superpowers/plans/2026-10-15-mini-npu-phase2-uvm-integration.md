@@ -115,7 +115,7 @@
 - Create: `tb/uvm/common/npu_cosim_checker.sv` (subscriber: on each `npu_rvvi_item`, call `iss_step(&rec)` and compare)
 - Create: `tb/uvm/common/npu_sim_ctrl_if.sv`, `npu_sim_ctrl_monitor` (ends the test on PASS/FAIL; raises `UVM_FATAL` on timeout)
 - Create: `tb/uvm/common/npu_base_test.sv` (backdoor load from plusargs, objection until `sim_ctrl` end or timeout)
-- Create **[support]**: `run.py`, `sim/tests.yaml` (test → env, firmware, expected result `pass|fail`, seeds), `manifest.yaml` writer *(done 2026-11-07 for QuestaSim, with Task 16: per-build `modelsim.ini` mapping UVM 1.2, expected-fail tests judged by their error IDs; `run_py_selftest` done 2026-11-07: dummy tests in `sim/selftest/`, suite `selftest`, `--tests <yaml>`, flips checked by `sim/selftest/check_run_py.py`; `--simulator xsim` is open)*
+- Create **[support]**: `run.py`, `sim/tests.yaml` (test → env, firmware, expected result `pass|fail`, seeds), `manifest.yaml` writer *(done 2026-11-07 for QuestaSim, with Task 16: per-build `modelsim.ini` mapping UVM 1.2, expected-fail tests judged by their error IDs; `run_py_selftest` done 2026-11-07: dummy tests in `sim/selftest/`, suite `selftest`, `--tests <yaml>`; `sim/selftest/check_run_py.py` checks that run.py rejects a violation of each pass-rule condition (summary, UVM_ERROR, UVM_FATAL, simulator error) and of each half of the expected-fail ID rule; `--simulator xsim` is open)*
 - Modify (Tấn): `model/c/rv_iss.{h,c}`: add `uint32_t iss_mem_read(uint32_t addr);` (needed by Task 18 end-of-test check)
 
 **Interfaces:**

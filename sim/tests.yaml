@@ -47,9 +47,11 @@ tests:
   mac_unwritten_entry_flagged: {env: mac, expect: fail, expect_ids: [UNWRITTEN_ENTRY]}
   # Step 6: mac_rand_seq, random op mix (spec 10.3); run with --seeds N (plan: >= 200)
   mac_rand:                    {env: mac}
-  # run_py_selftest: one expected-pass and one expected-fail dummy test
+  # run_py_selftest: dummy tests (sim/selftest/selftest_tb.sv). selftest_sva and selftest_no_summary are
+  # deliberately not listed; sim/selftest/check_run_py.py adds them to a temporary list.
   selftest_pass:               {env: selftest}
   selftest_fail:               {env: selftest, expect: fail, expect_ids: [SELFTEST_FAIL]}
+  selftest_fatal:              {env: selftest, expect: fail, expect_ids: [SELFTEST_FATAL]}
 
 suites:
   mac_directed:
@@ -80,3 +82,4 @@ suites:
   selftest:
     - selftest_pass
     - selftest_fail
+    - selftest_fatal
