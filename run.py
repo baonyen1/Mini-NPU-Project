@@ -17,7 +17,9 @@ A run passes when the log has the UVM report summary, UVM_ERROR : 0, UVM_FATAL :
 error. An expected-fail test (sim/tests.yaml) must fail, and only with the IDs it lists. A run killed at
 the wall-clock limit (--wall-limit) is a failure either way. The exit code is 0 only if every run
 matched its expectation. <run directory>/manifest.yaml records the tools, the git revision and, per
-run, the result and the SHA-256 of its sim.log and cov.ucdb.
+run, the result, the GATING_EN value passed (gating_en: 1 | 0 | null) and the SHA-256 of its sim.log and
+cov.ucdb. --config d1 is refused (exit 2, before any build) when the target needs an env without
+gating: true in sim/tests.yaml, since such an env would silently run as D0.
 
 Only QuestaSim is supported for now: Vivado (xsim) is no longer installed on the team machine
 (CLAUDE.md section 10). vlog, vsim and gcc must be on PATH (QuestaSim: C:\\questasim64_10.7c\\win64).
@@ -221,9 +223,11 @@ def run_one(test, spec, env, work, lib, config, seed, run_dir, args):
     ucdb = rdir / "cov.ucdb"
     do = "run -all; quit -f"
     cmd = [tool("vsim"), "-c", "-lib", rel(work)]
-    # only an env whose top declares GATING_EN (gating: true in sim/tests.yaml) gets the D0/D1 parameter
-    if env.get("gating", False):
-        cmd.append(f"-GGATING_EN={1 if config == 'd1' else 0}")
+    # only an env whose top declares GATING_EN (gating: true in sim/tests.yaml) gets the D0/D1 parameter;
+    # main() has refused --config d1 for any other env. None = no -GGATING_EN passed (recorded as null).
+    gating_en = (1 if config == "d1" else 0) if env.get("gating", False) else None
+    if gating_en is not None:
+        cmd.append(f"-GGATING_EN={gating_en}")
     cmd += [env["top"], f"+UVM_TESTNAME={test}", "-sv_seed", str(seed)]
     if lib is not None:
         cmd += ["-sv_lib", rel(lib)]
@@ -251,7 +255,7 @@ def run_one(test, spec, env, work, lib, config, seed, run_dir, args):
         ok = finished and not passed and not sim_errors and bool(ids) and set(ids) <= want and want <= set(ids)
         why = "" if ok else f"expected a failure with exactly {sorted(want)}, got IDs {ids}" + \
               ("" if finished else ", no UVM report summary")
-    return ok, passed, why, log, (ucdb if args.cov else None)
+    return ok, passed, why, log, (ucdb if args.cov else None), gating_en
 
 
 def write_manifest(run_dir, args, results):
@@ -321,6 +325,14 @@ def main():
     tests = expand_target(db, args.target, args.tests)
     if not tests:
         sys.exit(f"run.py: '{args.target}' expands to no test, nothing to run")
+    if args.config == "d1":
+        # without GATING_EN the env would run at its default (D0) while the manifest says d1, and a D0/D1
+        # comparison (SC3) would compare D0 with D0; refuse before anything is built
+        no_gating = sorted({db["tests"][t]["env"] for t in tests
+                            if not db["envs"][db["tests"][t]["env"]].get("gating", False)})
+        if no_gating:
+            ap.error(f"--config d1 needs an env with 'gating: true' in {shown(args.tests)}; "
+                     f"'{args.target}' uses env(s) without it: {', '.join(no_gating)} (run them with --config d0)")
     for name in ("vlog", "vsim"):
         tool(name)
     tool("gcc", " (QuestaSim compiles the DPI export wrapper of uvm_pkg with it for every UVM run, "
@@ -338,12 +350,13 @@ def main():
             builds[env_name] = build(env_name, db["envs"][env_name], run_dir)
         work, lib = builds[env_name]
         for seed in range(1, args.seeds + 1):
-            ok, passed, why, log, ucdb = run_one(test, spec, db["envs"][env_name], work, lib,
-                                                 args.config, seed, run_dir, args)
+            ok, passed, why, log, ucdb, gating_en = run_one(test, spec, db["envs"][env_name], work, lib,
+                                                            args.config, seed, run_dir, args)
             expect = spec.get("expect", "pass")
             verdict = ("PASS" if passed else "FAIL") + ("" if expect == "pass" else " (expected fail)")
             print(f"{'ok ' if ok else 'BAD'}  {test:32s} seed {seed}  {verdict}  {why}", flush=True)
-            entry = {"test": test, "config": args.config, "seed": seed, "expect": expect,
+            # gating_en: the -GGATING_EN value actually passed to vsim (1, 0, or null when none was passed)
+            entry = {"test": test, "config": args.config, "gating_en": gating_en, "seed": seed, "expect": expect,
                      "result": "pass" if passed else "fail", "matches_expectation": ok,
                      "log": log.relative_to(ROOT).as_posix(), "log_sha256": sha256(log)}
             if ucdb is not None:

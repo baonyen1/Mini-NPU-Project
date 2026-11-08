@@ -3,7 +3,8 @@
 #
 #   envs:    how to build and start an environment: filelist (compile list), top (top module), dpi (DPI-C
 #            sources, optional), gating (optional, default false: true when the top declares the parameter
-#            GATING_EN; only then does run.py pass -GGATING_EN=0|1 for --config d0|d1)
+#            GATING_EN; only then does run.py pass -GGATING_EN=0|1 for --config d0|d1; run.py refuses
+#            --config d1 for a target that needs an env without it, which would silently run as D0)
 #   tests:   env, expected result (pass | fail, default pass) and, for an expected-fail test, the only
 #            UVM_ERROR / UVM_FATAL IDs it may report (each must appear at least once)
 #   suites:  named lists for --target. An entry is a test, or another suite when no test has that name;

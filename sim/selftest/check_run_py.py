@@ -25,6 +25,7 @@ case trips exactly one condition of run.py's rules (run.py run_one, main):
   suite cycle                  suites a: [b], b: [a]                         exit 1, no run, "suite cycle"
   empty suite                  suite []                                      exit 1, no run, "expands to no test"
   seeds 0                      --seeds 0                                     exit 2, no run
+  d1 without gating            --config d1 (env selftest has no gating key)  exit 2, no run, names the env
 Every case that runs tests must print its run directory; at the end these directories must be distinct and
 each must still hold every sim.log with the SHA-256 its manifest.yaml records (run.py overwrites no earlier
 evidence). The changed lists are temporary copies (run.py --tests); sim/tests.yaml is never changed. Needs
@@ -111,6 +112,9 @@ CASES = [
          want_text="suite cycle cycle_a -> cycle_b -> cycle_a"),
     Case("empty suite", add_suites(selftest_empty=[]), "selftest_empty", 1, {}, want_text="expands to no test"),
     Case("seeds 0", None, "selftest", 2, {}, ("--seeds", "0"), "--seeds must be at least 1"),
+    # a d1 run of an env without GATING_EN would simulate D0 under a d1 label (SC3 would compare D0 with D0)
+    Case("d1 without gating", None, "selftest", 2, {}, ("--config", "d1"),
+         "uses env(s) without it: selftest"),
 ]
 
 
