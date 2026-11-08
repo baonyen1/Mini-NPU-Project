@@ -11,7 +11,7 @@ Run on 2026-10-17 on the Windows machine of Nguyen The Bao. Scripts: `sim/questa
 | QuestaSim | `Questa Sim-64 vsim 10.7c Simulator 2018.08 Aug 18 2018` (`C:\questasim64_10.7c`) |
 | Licence | `MGLS_LICENSE_FILE=C:\questasim64_10.7c\win64\LICENSE.txt`, a local node file (`SERVER bao ... 27001`, `VENDOR mgcld`). `randomize` and `covergroup` both ran (S1, S3), which the FPGA Starter edition rejects. |
 | Vivado xsim | 2024.1 (`C:\Xilinx\Vivado\2024.1\bin`); **no longer on Bảo's machine** (`C:\Xilinx` was found empty on 2026-10-26), S6 below was run before that |
-| RISC-V binutils/gcc | `riscv64-unknown-elf-gcc` 12.2.0 from Vitis 2024.1 (`C:\Xilinx\Vitis\2024.1\gnu\riscv\nt\riscv64-unknown-elf\bin`); gone since 2026-10-26, the regression now runs in WSL with `binutils-riscv64-unknown-elf` (Ubuntu 24.04) |
+| RISC-V binutils/gcc | `riscv64-unknown-elf-gcc` 12.2.0 from Vitis 2024.1 (`C:\Xilinx\Vitis\2024.1\gnu\riscv\nt\riscv64-unknown-elf\bin`); gone since 2026-10-26, the regression now runs in WSL with `binutils-riscv64-unknown-elf` (Ubuntu 24.04); since 2026-11-09 WSL also has the C compiler `riscv64-unknown-elf-gcc (13.2.0-11ubuntu1+12) 13.2.0` (package `gcc-riscv64-unknown-elf`, see the section below); no RISC-V C compiler on Windows |
 | Verilator | `Verilator 5.020 2024-01-01 rev (Debian 5.020-1)` in WSL Ubuntu 24.04, installed by Bảo on 2026-10-27; not available natively on Windows |
 
 ## Results
@@ -41,3 +41,15 @@ Run on 2026-10-17 on the Windows machine of Nguyen The Bao. Scripts: `sim/questa
 - Not run in WSL: `pytest model/py/tests` (no numpy there). On Windows with the committed (LF) bytes it gives `13 passed`.
 
 Note on WSL: on 2026-10-26 `wsl.exe` crashed (`0xC00000FD`) about 30 s into every session while the host had 0.4 GB RAM free and the WSL VM held 4.7 GB (probable cause, not proven). On 2026-10-27 the host had 4.4 GB RAM free again and sessions of up to ~26 s ran reliably; longer ones were not tried.
+
+## RISC-V C compiler check on 2026-11-09 (WSL, for the Task 13 firmware)
+
+Bảo installed `gcc-riscv64-unknown-elf` in WSL Ubuntu 24.04 (`sudo apt install -y gcc-riscv64-unknown-elf`). A scratch script (not committed) ran these checks in one WSL session:
+
+- `riscv64-unknown-elf-gcc --version`: `riscv64-unknown-elf-gcc (13.2.0-11ubuntu1+12) 13.2.0`.
+- `-print-multi-lib` lists `rv32i/ilp32` and `rv32im/ilp32` (among others) but no multilib with Zbb. With `-march=rv32im_zicsr_zifencei_zbb -mabi=ilp32`, gcc picks the nearest multilib, so libgcc's helpers are rv32im code without Zbb; they still run on the core, since rv32im is a subset of what it implements.
+- A C file with `__builtin_popcount`, a signed max, `__builtin_bswap32`, a multiply and an unsigned divide, compiled with `-march=rv32im_zicsr_zifencei_zbb -mabi=ilp32 -O2 -ffreestanding -nostdlib -c`: `objdump -d -M no-aliases` shows `cpop`, `max`, `rev8`, `mul` and `divu`.
+- Linking that file with a one-line `_start` stub, `-nostartfiles -lgcc -Wl,-Ttext=0`, succeeds. ld warned `cannot find entry symbol _start; defaulting to 00000000` because the stub lacked `.globl _start`; the real `crt0.S` must declare it, otherwise the entry point silently defaults to address 0.
+- Five `.insn r 0x0B, ...` lines (funct3 0..3, funct7 0 and 1) assemble to `00b5000b 00b5100b 0005200b 0205200b 0005360b`, the custom-0 words expected for those operands.
+
+Not done yet: building and running real firmware (`sw/`, Task 13); `crt0.S`, `link.ld` and the Makefile do not exist yet.
