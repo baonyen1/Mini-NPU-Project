@@ -76,6 +76,12 @@
 
 ### Task 14: `npu_top` integration and plain-SV smoke tests — both, weeks 5–6
 
+**Status 2026-11-10 (engine side, `779d364`, written by Claude at Bảo's request; Bảo still has to read and defend it).** Done: `rtl/top/npu_top.sv`, `rtl/rtl.f`, `tb/directed/npu_top_tb.sv` with the bound checker `tb/directed/npu_top_chk.sv`, and `bash sim/questa/run_npu_top.sh`: 8 programs × D0/D1, 16/16 `RESULT: PASS`, cycle-identical, `clk_mac` gated off in every D1 run. Deviations from the text below, to be closed when Task 13 lands:
+- The tests are hand-written assembly in `tb/directed/prog/` (`build.sh` runs in WSL), not C in `sw/tests/*/main.c`, because `npu.h` does not exist yet. Mapping: `t_ldw_ldi_mac` → `t_hand_4x4_k4`, `t_read_all` → `t_read_all`, `t_errors` → `t_errors` (+ `t_err_k`), `t_status_csr` → `t_busy_cyc`, `t_war_safe` → `t_war`; extra: `t_fifo_full`, `t_dmem_decode`. The C versions are still owed (Tấn, Task 13).
+- The runner is `sim/questa/run_npu_top.sh`, not `run_npu_top.do`.
+- Step 4 lint: `verilator --lint-only -Wall -f rtl/rtl.f --top-module npu_top` reports 16 warnings, all in `rtl/core` (Track A); none in `npu_top` or the engine. It is not clean until Tấn fixes or waives them.
+- Open for both students: D18 wording (amended 2026-11-10, waits for Tấn's signature); whether `mmio_*` carries byte enables and how big the MMIO window is (today any store with a byte enable to `0x0002_xxxx` reaches `mmio_*`); who owns `npu_top.sv`.
+
 **Files:**
 - Create: `rtl/top/npu_top.sv` (core + `itcm` + `dtcm_dp` + `mac_engine #(GATING_EN)`; core port A → DTCM for `0x0001_xxxx`; core MMIO window `0x0002_xxxx` → top-level `mmio_*` ports; RVVI ports passed through under `` `ifdef RVVI_TRACE ``; halt/fault passed through if W2-1 defines them)
 - Create: `tb/directed/npu_top_tb.sv` (implements `SIM_CTRL`/`SIM_PUTC` on `mmio_*`; `+TIMEOUT_CYC`)
