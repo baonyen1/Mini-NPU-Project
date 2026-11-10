@@ -3,8 +3,11 @@
 #   make test_dtcm_dp     build tb/directed/dtcm_dp_tb.sv and run it twice:
 #                         once with an empty memory, once with the +DTCM backdoor fixture
 #   make test_cmd_fifo    build tb/directed/cmd_fifo_tb.sv (Task 11 stage 1) and run it at DEPTH 8 and 5
-#   make test_mac_engine  build tb/directed/mac_engine_tb.sv with the npu_ref DPI model and run all tests
-#                         (the g++ step can take more than 10 minutes; QuestaSim: sim/questa/run_mac_directed.sh)
+#   make test_mac_engine  build tb/directed/mac_engine_tb.sv with the npu_ref DPI model and run all tests (D0)
+#   make test_mac_engine_d1  the same suite against D1 (-GGATING_EN=1), built in build/mac_tb_d1
+#                         (each takes about 10 minutes with -j6, 12 cores and 6 GB free, measured 2026-11-10:
+#                         D0 10m11s, D1 9m57s, 21/21 PASS each; run `make -j6 -C sim/verilator ...`;
+#                         QuestaSim: sim/questa/run_mac_directed.sh)
 VERILATOR ?= verilator
 ROOT      := ../..
 PKG       := $(ROOT)/rtl/top/npu_pkg.sv
@@ -18,7 +21,7 @@ MAC_TB    := $(ROOT)/tb/uvm/common/npu_dpi_pkg.sv $(ROOT)/tb/directed/dtcm_model
 NPU_REF   := $(ROOT)/model/c/npu_ref.c
 BUILD     := build
 
-.PHONY: lint test_dtcm_dp test_cmd_fifo test_mac_engine clean
+.PHONY: lint test_dtcm_dp test_cmd_fifo test_mac_engine test_mac_engine_d1 clean
 
 lint:
 	$(VERILATOR) --lint-only -Wall --top-module dtcm_dp $(PKG) $(DTCM)
@@ -50,6 +53,9 @@ $(BUILD)/fifo_tb5/Vcmd_fifo_tb: $(PKG) $(FIFO) $(FIFO_TB)
 test_mac_engine: $(BUILD)/mac_tb/Vmac_engine_tb
 	./$(BUILD)/mac_tb/Vmac_engine_tb
 
+test_mac_engine_d1: $(BUILD)/mac_tb_d1/Vmac_engine_tb
+	./$(BUILD)/mac_tb_d1/Vmac_engine_tb
+
 # npu_ref.c is C: compiled by Verilator's make it would go through g++, the DPI symbols would get C++
 # names and the link fails, so it is built with gcc and handed over as an object file. -O0 on the
 # generated C++ shortens the build; the test is short, so speed does not matter.
@@ -61,6 +67,13 @@ $(BUILD)/mac_tb/Vmac_engine_tb: $(PKG) $(ENGINE) $(MAC_TB) $(BUILD)/npu_ref_c.o
 	mkdir -p $(BUILD)
 	$(VERILATOR) --binary --timing -Wall -j 4 --output-split 3000 \
 	    -MAKEFLAGS "OPT_FAST=-O0 OPT_SLOW=-O0 OPT_GLOBAL=-O0" --top-module mac_engine_tb --Mdir $(BUILD)/mac_tb \
+	    $(PKG) $(ENGINE) $(MAC_TB) $(abspath $(BUILD)/npu_ref_c.o)
+
+# D1: the same testbench with GATING_EN = 1 (the testbench parameter reaches mac_engine and its npu_clk_gate)
+$(BUILD)/mac_tb_d1/Vmac_engine_tb: $(PKG) $(ENGINE) $(MAC_TB) $(BUILD)/npu_ref_c.o
+	mkdir -p $(BUILD)
+	$(VERILATOR) --binary --timing -Wall -j 4 --output-split 3000 -GGATING_EN="1'b1" \
+	    -MAKEFLAGS "OPT_FAST=-O0 OPT_SLOW=-O0 OPT_GLOBAL=-O0" --top-module mac_engine_tb --Mdir $(BUILD)/mac_tb_d1 \
 	    $(PKG) $(ENGINE) $(MAC_TB) $(abspath $(BUILD)/npu_ref_c.o)
 
 clean:
