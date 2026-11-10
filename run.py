@@ -4,6 +4,7 @@
     python run.py --target mac_directed                 # a suite from sim/tests.yaml, D0
     python run.py --target mac_w1c --config d1          # one test, D1 (GATING_EN = 1)
     python run.py --target mac_directed --seeds 3 --cov # seeds 1..3, functional coverage saved (UCDB)
+    python run.py --target mac_regress --cov            # each test with its own seed count (seeds key)
     python run.py --list                                # the tests and suites known to sim/tests.yaml
     python run.py --target selftest                     # run.py's own self-test (three dummy UVM tests)
     python run.py --target selftest --tests other.yaml  # the same with another test list
@@ -12,7 +13,8 @@ Every invocation gets a directory of its own, out/<date>/<config>/<HHMMSS>-<targ
 the end), so no run overwrites the evidence of an earlier one and two concurrent runs share no work
 library. In it, per env: build_<env>/ (the DPI-C library built from the env's C sources with gcc, then
 vlog of the env's compile list); then one vsim per test and seed, log in <test>/<seed>/sim.log (and
-cov.ucdb with --cov). A suite may list tests and other suites (expanded recursively; a cycle stops).
+cov.ucdb with --cov). A test runs seeds 1..N: N from --seeds when given, otherwise the test's seeds key in
+sim/tests.yaml (default 1), so a suite can run its directed tests once and a random test 200 times. A suite may list tests and other suites (expanded recursively; a cycle stops).
 A run passes when the log has the UVM report summary, UVM_ERROR : 0, UVM_FATAL : 0 and no simulator
 error. An expected-fail test (sim/tests.yaml) must fail, and only with the IDs it lists. A run killed at
 the wall-clock limit (--wall-limit) is a failure either way. The exit code is 0 only if every run
@@ -54,7 +56,18 @@ def load_db(path):
     if not path.is_file():
         sys.exit(f"run.py: no test list {shown(path)}")
     with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        db = yaml.safe_load(f)
+    # keys whose wrong type would silently change a run: gating: "false" (a string) is truthy and would
+    # run the env as D1; seeds: "2" or true would not be the count it looks like
+    for name, env in (db.get("envs") or {}).items():
+        if "gating" in env and not isinstance(env["gating"], bool):
+            sys.exit(f"run.py: env '{name}' in {shown(path)}: gating must be true or false (a YAML bool), "
+                     f"not {env['gating']!r}")
+    for name, spec in (db.get("tests") or {}).items():
+        seeds = spec.get("seeds", 1)
+        if isinstance(seeds, bool) or not isinstance(seeds, int) or seeds < 1:
+            sys.exit(f"run.py: test '{name}' in {shown(path)}: seeds must be an integer >= 1, not {seeds!r}")
+    return db
 
 
 def expand_suite(db, suite, path, stack=()):
@@ -289,7 +302,8 @@ def main():
     ap.add_argument("--simulator", default="questa", choices=["questa", "xsim"])
     ap.add_argument("--target", help="a test or a suite of sim/tests.yaml")
     ap.add_argument("--config", default="d0", choices=["d0", "d1"])
-    ap.add_argument("--seeds", type=int, default=1, help="run seeds 1..N")
+    ap.add_argument("--seeds", type=int, help="run seeds 1..N of every test (default: the test's seeds key "
+                                              "in the test list, else 1)")
     ap.add_argument("--cov", action="store_true", help="save functional coverage (UCDB) per run")
     ap.add_argument("--timeout-cyc", type=int, help="override +TIMEOUT_CYC")
     # a backstop for what +TIMEOUT_CYC cannot catch (a zero-time loop); mac_rand takes about 4 s per seed
@@ -301,7 +315,7 @@ def main():
     ap.add_argument("--tests", type=Path, default=TESTS_YAML, help="test list (default sim/tests.yaml)")
     args = ap.parse_args()
 
-    if args.seeds < 1:
+    if args.seeds is not None and args.seeds < 1:
         ap.error("--seeds must be at least 1")
     if args.wall_limit < 1:
         ap.error("--wall-limit must be at least 1 s")
@@ -315,7 +329,7 @@ def main():
             print(f"  {name:32s} {n:3d} tests = {' + '.join(entries or [])}")
         print("tests:")
         for name, spec in db["tests"].items():
-            print(f"  {name:32s} env={spec['env']} expect={spec.get('expect', 'pass')}")
+            print(f"  {name:32s} env={spec['env']} expect={spec.get('expect', 'pass')} seeds={spec.get('seeds', 1)}")
         return 0
     if not args.target:
         ap.error("--target is required")
@@ -349,7 +363,8 @@ def main():
             print(f"== build {env_name} ({args.config})", flush=True)
             builds[env_name] = build(env_name, db["envs"][env_name], run_dir)
         work, lib = builds[env_name]
-        for seed in range(1, args.seeds + 1):
+        n_seeds = args.seeds if args.seeds is not None else spec.get("seeds", 1)
+        for seed in range(1, n_seeds + 1):
             ok, passed, why, log, ucdb, gating_en = run_one(test, spec, db["envs"][env_name], work, lib,
                                                             args.config, seed, run_dir, args)
             expect = spec.get("expect", "pass")

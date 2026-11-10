@@ -5,8 +5,10 @@
 #            sources, optional), gating (optional, default false: true when the top declares the parameter
 #            GATING_EN; only then does run.py pass -GGATING_EN=0|1 for --config d0|d1; run.py refuses
 #            --config d1 for a target that needs an env without it, which would silently run as D0)
+#            (a YAML bool: run.py rejects any other value, e.g. the string "false")
 #   tests:   env, expected result (pass | fail, default pass) and, for an expected-fail test, the only
-#            UVM_ERROR / UVM_FATAL IDs it may report (each must appear at least once)
+#            UVM_ERROR / UVM_FATAL IDs it may report (each must appear at least once); seeds (optional,
+#            an integer >= 1, default 1): run.py runs seeds 1..seeds of the test unless --seeds N is given
 #   suites:  named lists for --target. An entry is a test, or another suite when no test has that name;
 #            run.py expands suites recursively, runs each test once, and stops on a cycle
 envs:
@@ -50,8 +52,13 @@ tests:
   mac_war_inject:              {env: mac, expect: fail, expect_ids: [WAR_RULE]}
   # Review Focus 4: a COMPUTE that reads unwritten buffer entries is a test error
   mac_unwritten_entry_flagged: {env: mac, expect: fail, expect_ids: [UNWRITTEN_ENTRY]}
-  # Step 6: mac_rand_seq, random op mix (spec 10.3); run with --seeds N (plan: >= 200)
-  mac_rand:                    {env: mac}
+  # Task 19: every op x K bin x K mod 4 cell of cg_cmd (spec 10.5, D24), with the error bits checked
+  mac_k_cross:                 {env: mac}
+  # Task 19: a reset in the middle of a LOAD leaves no spurious cg_state transition (review minor F9b)
+  mac_reset_midrun:            {env: mac}
+  # Step 6: mac_rand_seq, random op mix (spec 10.3). The plan asks for >= 200 seeds: run.py runs seeds
+  # 1..200 of it unless --seeds N is given (the 200-seed runs of 2026-11-07 and of Task 19 used 1..200)
+  mac_rand:                    {env: mac, seeds: 200}
   # run_py_selftest: dummy tests (sim/selftest/selftest_tb.sv). selftest_sva and selftest_no_summary are
   # deliberately not listed; sim/selftest/check_run_py.py adds them to a temporary list.
   selftest_pass:               {env: selftest}
@@ -82,9 +89,12 @@ suites:
     - mac_mem_mirror_inject
     - mac_war_inject
     - mac_unwritten_entry_flagged
+    - mac_k_cross
+    - mac_reset_midrun
   mac_rand:
     - mac_rand
-  # Task 19's regression of the engine; also the first nested suite
+  # Task 19's regression of the engine (the mac_directed tests once, mac_rand with its 200 seeds); also
+  # the first nested suite: python run.py --target mac_regress --config d0 --cov
   mac_regress:
     - mac_directed
     - mac_rand

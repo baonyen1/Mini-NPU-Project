@@ -62,7 +62,7 @@
   - `mac_gate_idle_mix`: `mac_rand_seq` with inter-command gaps forced to {0, 1, 2, 150} cycles so that all `cg_gate` bins are hit
 - [ ] **Step 2:** `run.py --target mac_gate --config d1` → FAIL.
 - [ ] **Step 3:** Implement.
-- [ ] **Step 4:** `run.py --target mac_regress --config d1 --seeds 200 --cov` → 0 mismatches, 0 SVA failures (A-MAC-*, A-GATE-*), `cg_gate` 100 %; the same command with `--config d0` still green. Then `run.py --target regress_d1` (Phase 2 Task 19 suite) → green (SC1 on D1).
+- [ ] **Step 4:** `run.py --target mac_regress --config d1 --cov` (no `--seeds`: it would override the `seeds` key of every test, so the 24 directed tests would run 200 times each; `mac_rand` gets its 200 seeds from `sim/tests.yaml`) → 0 mismatches, 0 SVA failures (A-MAC-*, A-GATE-*), `cg_gate` 100 %; the same command with `--config d0` still green. Then `run.py --target regress_d1` (Phase 2 Task 19 suite) → green (SC1 on D1).
 - [ ] **Step 5: Commit** `feat(npu): npu_clk_gate and D1 gating with assertions and cg_gate`.
 
 ---

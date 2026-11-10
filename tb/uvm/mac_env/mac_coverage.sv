@@ -68,8 +68,12 @@ class mac_coverage extends uvm_component;
         cp_push_while_full: coverpoint full { bins stall = {1}; }
     endgroup
 
-    // FSM transitions; READ_RESULT requested while the engine is busy
-    covergroup cg_state with function sample(bit [1:0] st, bit read_busy);
+    // FSM transitions; READ_RESULT requested while the engine is busy. st is the 2-bit FSM state, or
+    // ST_IN_RESET while rst_n is low: a covergroup keeps its transition history across samples, so without
+    // a sample in between, the last state before a reset and IDLE after it would form a transition (a
+    // spurious load_idle, mac_idle or check_idle per reset). No bin starts or ends at ST_IN_RESET.
+    localparam bit [2:0] ST_IN_RESET = 3'd4;
+    covergroup cg_state with function sample(bit [2:0] st, bit read_busy);
         cp_tr: coverpoint st {
             bins idle_check  = (0 => 1);
             bins check_load  = (1 => 2);
@@ -131,8 +135,11 @@ class mac_coverage extends uvm_component;
     task run_phase(uvm_phase phase);
         forever begin
             @(posedge cmd_vif.clk);
-            if (probe_vif.rst_n !== 1'b1) continue;
-            cg_state.sample(probe_vif.state, cmd_vif.rd_req === 1'b1 && cmd_vif.rd_ready !== 1'b1);
+            if (probe_vif.rst_n !== 1'b1) begin
+                cg_state.sample(ST_IN_RESET, 1'b0);          // breaks the transition history (see cg_state)
+                continue;
+            end
+            cg_state.sample({1'b0, probe_vif.state}, cmd_vif.rd_req === 1'b1 && cmd_vif.rd_ready !== 1'b1);
             if (cmd_vif.cmd_valid === 1'b1) cg_fifo.sample(probe_vif.fifo_count, probe_vif.fifo_full);
         end
     endtask

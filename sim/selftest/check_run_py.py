@@ -26,6 +26,12 @@ case trips exactly one condition of run.py's rules (run.py run_one, main):
   empty suite                  suite []                                      exit 1, no run, "expands to no test"
   seeds 0                      --seeds 0                                     exit 2, no run
   d1 without gating            --config d1 (env selftest has no gating key)  exit 2, no run, names the env
+  d1 mixed suite               suite [mac_w1c, selftest_pass], --config d1   exit 2, no run, names env selftest
+                               (env mac has gating: true, selftest none)
+  gating not a bool            env selftest gating: "false" (a string)       exit 1, no run, "gating must be"
+  seeds key                    selftest_pass seeds: 2                        exit 0, selftest_pass runs twice
+  --seeds over the key         selftest_pass seeds: 2; --seeds 1             exit 0, every test once
+  seeds key 0                  selftest_pass seeds: 0                        exit 1, no run, "seeds must be"
 Every case that runs tests must print its run directory; at the end these directories must be distinct and
 each must still hold every sim.log with the SHA-256 its manifest.yaml records (run.py overwrites no earlier
 evidence). The changed lists are temporary copies (run.py --tests); sim/tests.yaml is never changed. Needs
@@ -88,6 +94,13 @@ def add_suites(**suites: List[str]) -> Callable[[dict], None]:
     return change
 
 
+def set_env_key(env: str, key: str, value: object) -> Callable[[dict], None]:
+    """A change that sets one key of one env."""
+    def change(db: dict) -> None:
+        db["envs"][env][key] = value
+    return change
+
+
 def only_bad(bad: str) -> Dict[str, str]:
     return {t: ("BAD" if t == bad else "ok") for t in SUITE}
 
@@ -115,17 +128,34 @@ CASES = [
     # a d1 run of an env without GATING_EN would simulate D0 under a d1 label (SC3 would compare D0 with D0)
     Case("d1 without gating", None, "selftest", 2, {}, ("--config", "d1"),
          "uses env(s) without it: selftest"),
+    # one env with gating is not enough: every env the suite needs must have it (no Questa time, refused
+    # before the build)
+    Case("d1 mixed suite", add_suites(selftest_mixed=["mac_w1c", "selftest_pass"]), "selftest_mixed", 2, {},
+         ("--config", "d1"), "uses env(s) without it: selftest"),
+    # the string "false" is truthy: read as a flag it would pass -GGATING_EN to an env without the parameter
+    Case("gating not a bool", set_env_key("selftest", "gating", "false"), "selftest", 1, {},
+         want_text="gating must be true or false"),
+    Case("seeds key", set_spec("selftest_pass", seeds=2), "selftest", 0,
+         {"selftest_pass": "ok twice", "selftest_fail": "ok", "selftest_fatal": "ok"}),
+    Case("--seeds over the key", set_spec("selftest_pass", seeds=2), "selftest", 0, {t: "ok" for t in SUITE},
+         ("--seeds", "1")),
+    Case("seeds key 0", set_spec("selftest_pass", seeds=0), "selftest", 1, {}, want_text="seeds must be"),
 ]
 
 
 def verdicts(stdout: str) -> Dict[str, str]:
-    """Map each test to 'ok' or 'BAD' from run.py's per-run lines ("ok   <test> seed 1 ..."); a test that
-    runs more than once (only seed 1 is asked for) maps to 'twice'."""
-    found: Dict[str, str] = {}
+    """Map each test to its verdict from run.py's per-run lines ("ok   <test> seed 1 ..."): 'ok' or 'BAD'
+    (BAD if any of its runs is BAD), followed by the exact run count when it ran more than once ('ok twice',
+    'ok 3x', ...). Only the seeds-key case wants a test more than once, and it then fails on any other count."""
+    runs: Dict[str, List[str]] = {}
     for line in stdout.splitlines():
         fields = line.split()
         if len(fields) >= 2 and fields[0] in ("ok", "BAD"):
-            found[fields[1]] = "twice" if fields[1] in found else fields[0]
+            runs.setdefault(fields[1], []).append(fields[0])
+    found: Dict[str, str] = {}
+    for test, seen in runs.items():
+        verdict = "BAD" if "BAD" in seen else "ok"
+        found[test] = verdict if len(seen) == 1 else f"{verdict} {'twice' if len(seen) == 2 else f'{len(seen)}x'}"
     return found
 
 

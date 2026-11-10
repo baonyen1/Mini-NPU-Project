@@ -654,6 +654,84 @@ class mac_unwritten_entry_flagged_seq extends mac_base_seq;
     endtask
 endclass
 
+// Task 19: every cell of cg_cmd's op x K bin x K mod 4 cross (spec 10.5, D24), deterministically. For each
+// op, K runs over both edges of every K bin in each residue mod 4: 0; 1..7; 8..11 and 60..63; 64..67 and
+// KMAX-4..KMAX-1; KMAX; KMAX+1..KMAX+4 and 0xFFFF_FFFC..0xFFFF_FFFF. The random mix reaches OP_ILLEGAL
+// with an illegal K only a few times in 200 seeds, so these cells are closed here. Each command runs
+// alone and its error bits are checked against the spec 6.3 table (D16: ILLEGAL sets err_illegal only,
+// whatever its K); the scoreboard also compares every result and npu_status with npu_ref.
+class mac_k_cross_seq extends mac_base_seq;
+    `uvm_object_utils(mac_k_cross_seq)
+    function new(string name = "mac_k_cross_seq"); super.new(name); endfunction
+    task body();
+        npu_op_e   ops [4] = '{OP_LDW, OP_LDI, OP_MAC, OP_ILLEGAL};
+        bit [31:0] ks [$];
+        bit [31:0] want, addr;
+        ks.push_back(0);
+        for (int unsigned k = 1; k <= 7; k++) ks.push_back(k);
+        for (int unsigned m = 0; m < 4; m++) begin
+            ks.push_back(8 + m);
+            ks.push_back(60 + m);
+            ks.push_back(64 + m);
+            ks.push_back(KMAX - 4 + m);
+            ks.push_back(KMAX + 1 + m);
+            ks.push_back(32'hFFFF_FFFC + m);
+        end
+        ks.push_back(KMAX);
+        rng = 32'h0C0F_FEE5;
+        big_random_setup();                            // all WBUF/IBUF entries written: no COMPUTE reads unwritten ones
+        foreach (ops[o]) begin
+            foreach (ks[n]) begin
+                // a LOAD at DTCM_BASE is in range for every legal K (4 * KMAX bytes); COMPUTE and ILLEGAL
+                // ignore the address (spec 6.3)
+                addr = (ops[o] inside {OP_LDW, OP_LDI}) ? DTCM_BASE : W0;
+                if (ops[o] == OP_ILLEGAL)                          want = 32'd1 << ST_ERR_ILLEGAL;
+                else if (ks[n] > KMAX || ks[n][1:0] != 2'b00)      want = 32'd1 << ST_ERR_K;
+                else                                               want = 0;
+                push(ops[o], addr, ks[n], 1'(n % 2));
+                expect_errs($sformatf("%s K %0d", ops[o].name(), ks[n]), want);
+                if (want != 0) clear_errors();
+            end
+            check_all();
+        end
+    endtask
+endclass
+
+// Task 19 (deferred review minor F9b): a reset in the middle of a LOAD must not leave cg_state with a
+// transition from the state before the reset to IDLE after it (it would hit load_idle although no LOAD
+// finished). After the reset only idle_check and check_load (2 of the 6 cp_tr bins) may be covered;
+// a LOAD that does finish afterwards must then hit load_idle (3 of 6), so the check is not vacuous. The
+// test drives rst_n itself, 1 ns after an edge as mac_tb_top does; it also exercises the predictor's
+// RESET path (npu_ref_reset and the memory mirror) in the middle of a test.
+class mac_reset_midrun_seq extends mac_base_seq;
+    `uvm_object_utils(mac_reset_midrun_seq)
+    function new(string name = "mac_reset_midrun_seq"); super.new(name); endfunction
+
+    task expect_tr_cov(string where, real want);
+        real c = env.coverage.cg_state.cp_tr.get_coverage();
+        if (c < want - 0.1 || c > want + 0.1)
+            `uvm_error("COV_STATE", $sformatf("%s: cg_state.cp_tr %0.2f%%, expected %0.2f%%", where, c, want))
+    endtask
+
+    task body();
+        virtual mac_cmd_if vif = env.cmd_agent.drv.vif;
+        bit [31:0] st;
+        hand_setup();
+        push(OP_LDW, BIG_W, KMAX);                     // IDLE -> CHECK -> LOAD of 256 quads
+        repeat (8) csr_rd(CSR_NPU_STATUS, st);         // a few cycles into the LOAD
+        if (!st[ST_BUSY]) `uvm_error("RESET_MIDRUN", "the LOAD is not running when the reset is applied")
+        expect_tr_cov("before the reset", 100.0 * 2 / 6);
+        #1 vif.rst_n = 1'b0;
+        repeat (3) @(posedge vif.clk);
+        #1 vif.rst_n = 1'b1;
+        repeat (4) csr_rd(CSR_NPU_STATUS, st);         // idle cycles after the reset: IDLE is sampled
+        expect_tr_cov("after a reset in LOAD", 100.0 * 2 / 6);
+        push(OP_LDW, W0, 4);                           // a LOAD that finishes: load_idle
+        drain();
+        expect_tr_cov("after a complete LOAD", 100.0 * 3 / 6);
+    endtask
+endclass
+
 // ==== Step 6: random stimulus (spec 10.3 mac_rand_seq) ===============================================
 //
 // mac_rand_cmd is one random step of mac_rand_seq: a command push, a READ_RESULT or a CSR access. All of
@@ -662,7 +740,19 @@ endclass
 //
 //   kind     LDW 30 / LDI 30 / MAC 30 / ILLEGAL 2 / READ 8 (spec 10.3, plan Task 16 Step 6), plus CSR
 //            reads 3 and CSR writes 2 on top, so a W1C in flight and D23 get random coverage too; the
-//            ratios between the five command kinds are those of the plan
+//            ratios between the five command kinds are those of the plan for the ordinary steps. Task 19
+//            adds two targeted steps, D23 2 and BUSY_WR 2 (about 7 of each per 400-step seed); each D23
+//            step pushes one more command (a quarter of them ILLEGAL), which the summary line does not
+//            count in its pushes, K bins or illegal-K %:
+//            D23      drain (a READ), push one erroneous command, and W1C npu_status in exactly its CHECK
+//                     cycle (cycles counted from the push as measured at the start, as mac_d23 does), then
+//                     read npu_status in the next cycle: the bit the command sets must be 1 (the set wins,
+//                     D23) and every other named error bit cleared (scoreboard). Which error (err_k with
+//                     LDW/LDI/MAC, err_addr, err_illegal, err_align), its K/address and the other W1C bits
+//                     are random. The step fails if the W1C missed that edge (predictor n_d23).
+//            BUSY_WR  write a random value to npu_busy_cyc at a random point (the engine is busy in most
+//                     cycles of this mix) and read it in the next cycle: exactly the written value (D17:
+//                     the write wins over that cycle's increment); npu_ref keeps no count (spec 10.2)
 //   K        k_ok 95 % (legal: 0 or a multiple of 4 up to KMAX), 5 % illegal; then a bin of cg_cmd
 //            (spec 10.5, D24): legal K: {0} 5, [1:7] (that is K = 4) 15, [8:63] 30, [64:KMAX-1] 35,
 //            {KMAX} 15; illegal K: [1:7], [8:63], [64:KMAX-1] (not a multiple of 4) and > KMAX, 1 each.
@@ -681,7 +771,9 @@ endclass
 //            of random bits, or of all four error bits in 25 % of them), 0x7C1 10, other 10 (ignored).
 //            50 % of the writes to 0x7C0 are followed by a gap-0 read of 0x7C0: without that read a
 //            later set of the same sticky bit hides a wrong W1C result (D23, a W1C in flight)
-typedef enum {RND_LDW, RND_LDI, RND_MAC, RND_ILLEGAL, RND_READ, RND_CSR_RD, RND_CSR_WR} mac_rand_kind_e;
+typedef enum {RND_LDW, RND_LDI, RND_MAC, RND_ILLEGAL, RND_READ, RND_CSR_RD, RND_CSR_WR, RND_D23,
+              RND_BUSY_WR} mac_rand_kind_e;
+typedef enum {D23_ERR_K, D23_ERR_ADDR, D23_ERR_ILLEGAL, D23_ERR_ALIGN} mac_rand_d23_e;
 typedef enum {RK_0, RK_1_7, RK_8_63, RK_64_KMAX1, RK_KMAX, RK_OVER} mac_rand_kbin_e;
 typedef enum {RA_IN, RA_FIRST, RA_LAST, RA_MISALIGNED, RA_BELOW, RA_PAST, RA_ONE_PAST, RA_TOP} mac_rand_acls_e;
 
@@ -705,16 +797,33 @@ class mac_rand_cmd extends uvm_object;
     rand bit             w1c_all;       // CSR write to npu_status: all four error bits
     rand bit [31:0]      csr_wdata;
     rand bit             rd_after_w1c;  // CSR write to npu_status: read npu_status right after it
+    rand mac_rand_d23_e  d23_err;       // D23 step: the error its command raises
+    rand bit [1:0]       d23_op;        // D23 step, err_k: 0 LDW, 1 LDI, 2/3 MAC; err_addr/err_align: [0] LDW/LDI
 
     int unsigned max_steps;             // input: min(WBUF, IBUF) entries written since reset
 
     constraint c_kind {
         kind dist {RND_LDW := 30, RND_LDI := 30, RND_MAC := 30, RND_ILLEGAL := 2, RND_READ := 8,
-                   RND_CSR_RD := 3, RND_CSR_WR := 2};
+                   RND_CSR_RD := 3, RND_CSR_WR := 2, RND_D23 := 2, RND_BUSY_WR := 2};
     }
 
-    // K: legal or not first, then the cg_cmd bin, then the value (the solve order keeps the weights)
-    constraint c_k_order { solve kind before k_ok; solve k_ok before k_bin; solve k_bin before k; }
+    // K: legal or not first, then the cg_cmd bin, then the value (the solve order keeps the weights).
+    // A D23 step picks its error before k_ok, so the four errors are equally likely.
+    constraint c_k_order {
+        solve kind before d23_err; solve d23_err before k_ok; solve k_ok before k_bin; solve k_bin before k;
+    }
+
+    // D23 step: K and address of a command that CHECK drops with exactly the chosen error (spec 6.3 table,
+    // D16 order K, alignment, range); every sum stays below 2^32 (k <= KMAX, addr < 2^31)
+    constraint c_d23 {
+        if (kind == RND_D23) {
+            (d23_err == D23_ERR_K)              -> !k_ok;
+            (d23_err inside {D23_ERR_ADDR, D23_ERR_ALIGN}) -> (k_ok && k != 0);
+            (d23_err == D23_ERR_ADDR)           -> (addr[3:0] == 4'h0 &&
+                                                    (addr < DTCM_BASE || (addr < 32'h8000_0000 && addr + 4 * k > DTCM_END)));
+            (d23_err == D23_ERR_ALIGN)          -> (addr[3:0] != 4'h0);
+        }
+    }
     constraint c_k_ok    { k_ok dist {1 := 95, 0 := 5}; }
     constraint c_k_bin {
         if (k_ok) k_bin dist {RK_0 := 5, RK_1_7 := 15, RK_8_63 := 30, RK_64_KMAX1 := 35, RK_KMAX := 15};
@@ -799,10 +908,12 @@ class mac_rand_seq extends mac_base_seq;
 
     int unsigned n_items = 400;
     int unsigned w_written, i_written;          // WBUF/IBUF entries 0..n-1 written since reset
-    int unsigned n_kind  [RND_CSR_WR + 1];      // draws per enum value, indexed by the enum
+    int unsigned n_kind  [RND_BUSY_WR + 1];     // draws per enum value, indexed by the enum
     int unsigned n_kbin  [RK_OVER + 1];
     int unsigned n_acls  [RA_TOP + 1];
+    int unsigned n_d23err [D23_ERR_ALIGN + 1];
     int unsigned n_k_bad, n_push, n_refresh, n_rd_w1c;
+    int unsigned check_delay;                   // cycles from a push into the drained engine to its CHECK
     bit [31:0]   sig = 32'h811C_9DC5;           // FNV-1a over the stimulus stream
 
     localparam bit [7:0] CORNERS [5] = '{8'h80, 8'hFF, 8'h00, 8'h01, 8'h7F};
@@ -842,11 +953,68 @@ class mac_rand_seq extends mac_base_seq;
         sig = mac_env::fnv1a(sig, v);
     endfunction
 
+    // check_delay = cycles after a push into the drained engine before that command's CHECK cycle, seen as
+    // the first npu_status read with busy = 1 (as in mac_d23). COMPUTE K = 0 passes CHECK and changes nothing.
+    task measure_check_delay();
+        bit [31:0] st;
+        drain();
+        push(OP_MAC, 0, 0, 1'b0);
+        check_delay = 0;
+        csr_rd(CSR_NPU_STATUS, st);
+        while (!st[ST_BUSY] && check_delay < 20) begin
+            check_delay++;
+            csr_rd(CSR_NPU_STATUS, st);
+        end
+        if (!st[ST_BUSY]) `uvm_fatal("D23", "npu_status.busy never became 1 after a push into the drained engine")
+        `uvm_info("D23", $sformatf("CHECK cycle: %0d cycle(s) after a push into the drained engine", check_delay), UVM_LOW)
+    endtask
+
+    // the D23 step (see the header): the W1C lands in the CHECK cycle of an erroneous command
+    task d23_step(mac_rand_cmd c);
+        npu_op_e       op;
+        mac_cmd_fate_e fate;
+        bit [31:0]     st, w1c;
+        int unsigned   bit_pos, n0;
+        case (c.d23_err)
+            D23_ERR_ILLEGAL: op = OP_ILLEGAL;
+            D23_ERR_K:       op = (c.d23_op == 0) ? OP_LDW : (c.d23_op == 1) ? OP_LDI : OP_MAC;
+            default:         op = c.d23_op[0] ? OP_LDI : OP_LDW;
+        endcase
+        fate = mac_cmd_fate(op, c.addr, c.k);
+        case (fate)
+            CMD_ILLEGAL:   bit_pos = ST_ERR_ILLEGAL;
+            CMD_ERR_K:     bit_pos = ST_ERR_K;
+            CMD_ERR_ALIGN: bit_pos = ST_ERR_ALIGN;
+            CMD_ERR_ADDR:  bit_pos = ST_ERR_ADDR;
+            default: `uvm_fatal("D23", $sformatf("D23 step: %s addr %08x K %0d raises no error (sequence bug)",
+                                                 op.name(), c.addr, c.k))
+        endcase
+        w1c = c.csr_wdata | (32'd1 << bit_pos);         // the bit being set, plus random others
+        note(op); note(c.addr); note(c.k); note(c.clr); note(w1c);
+        n_d23err[c.d23_err]++;
+        read(c.idx, st, c.gap);                         // drain: the cycle count below starts from idle
+        n0 = env.predictor.n_d23;
+        push(op, c.addr, c.k, c.clr, 0);
+        repeat (check_delay) begin
+            csr_rd(CSR_NPU_STATUS, st, 0);
+            if (st[ST_BUSY]) `uvm_error("D23", "the engine became busy earlier than measured at the start")
+        end
+        csr_wr(CSR_NPU_STATUS, w1c, 0);                 // in the CHECK cycle: the set and the W1C meet
+        csr_rd(CSR_NPU_STATUS, st, 0);                  // the next cycle, before anything can set the bit again
+        if (!st[bit_pos])
+            `uvm_error("D23", $sformatf("%s addr %08x K %0d with W1C %08x in its CHECK cycle: npu_status %08x, bit %0d clear (the set must win)",
+                       op.name(), c.addr, c.k, w1c, st, bit_pos))
+        if (env.predictor.n_d23 != n0 + 1)
+            `uvm_error("D23", $sformatf("the W1C did not meet the command's CHECK edge (predictor n_d23 %0d -> %0d)",
+                       n0, env.predictor.n_d23))
+    endtask
+
     task body();
         mac_rand_cmd c = mac_rand_cmd::type_id::create("c");
         bit [31:0]   d;
         npu_op_e     op;
         void'($value$plusargs("MAC_RAND_N=%d", n_items));
+        measure_check_delay();
         drain();
         fill_quads(0, DTCM_QUADS, 0);
         for (int unsigned n = 0; n < n_items; n++) begin
@@ -879,7 +1047,7 @@ class mac_rand_seq extends mac_base_seq;
                     note(c.csr_addr);
                     csr_rd(c.csr_addr, d, c.gap);
                 end
-                default: begin                                  // RND_CSR_WR
+                RND_CSR_WR: begin
                     note(c.csr_addr); note(c.csr_wdata);
                     csr_wr(c.csr_addr, c.csr_wdata, c.gap);
                     if (c.csr_addr == CSR_NPU_STATUS) begin
@@ -890,9 +1058,22 @@ class mac_rand_seq extends mac_base_seq;
                         end
                     end
                 end
+                RND_D23: d23_step(c);
+                RND_BUSY_WR: begin
+                    note(c.csr_wdata);
+                    csr_wr(CSR_NPU_BUSY_CYC, c.csr_wdata, c.gap);
+                    csr_rd(CSR_NPU_BUSY_CYC, d, 0);             // the next cycle: the written value, no increment
+                    if (d !== c.csr_wdata)
+                        `uvm_error("BUSY_CYC", $sformatf("npu_busy_cyc written %08x, read %08x in the next cycle (D17: the write wins)",
+                                   c.csr_wdata, d))
+                end
+                default: `uvm_fatal("RAND", $sformatf("mac_rand_cmd kind %s not handled", c.kind.name()))
             endcase
         end
         drain();
+        `uvm_info("MAC_RAND", $sformatf({"D23 steps %0d (err_k %0d, err_addr %0d, err_illegal %0d, err_align %0d); ",
+                  "npu_busy_cyc write-and-read steps %0d"}, n_kind[RND_D23], n_d23err[D23_ERR_K], n_d23err[D23_ERR_ADDR],
+                  n_d23err[D23_ERR_ILLEGAL], n_d23err[D23_ERR_ALIGN], n_kind[RND_BUSY_WR]), UVM_LOW)
         `uvm_info("MAC_RAND", $sformatf({"%0d steps: LDW %0d, LDI %0d, MAC %0d, ILLEGAL %0d, READ %0d, CSR_RD %0d, ",
                   "CSR_WR %0d (%0d npu_status reads right after a W1C); %0d pushes, illegal K %0d (%0.1f%%); ",
                   "K bins 0:%0d 1-7:%0d 8-63:%0d 64-KMAX-1:%0d ",
